@@ -10,7 +10,10 @@ unit SLogging;
   make a copy (ie. assign to stack local variable or allocate on heap).
 *}
 
-{$R-,T-,X+,H+,B-}
+//{$R-,T-,X+,H+,B-}
+
+
+{$B-} // Enable boolean short-circuit code generation by the compiler
 
 interface
 
@@ -90,6 +93,7 @@ type
   // Providers should always have zero argument constructor
   ILoggerProvider = interface
     function CreateLogger(Category: string): ILoggerImplementor;
+    procedure Close;
   end;
 
   {*
@@ -194,6 +198,8 @@ type
     FDynamicProps: TList<TProc<TDictionary<string, variant>>>;
     FValueFormatter: TValueFormatter;
     FStateFormatter: TStateFormatter<TLogState>;
+    FOnException: TProc<Exception>;
+    function AddProvider<T: ILoggerProvider>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
   public
     constructor Create;
     destructor Destroy; override;
@@ -201,7 +207,6 @@ type
     function CreateLogger<T>: ILogger<T>; overload;
     function CreateLogger(const Category: string): ILogger; overload;
 
-    function AddProvider<T: ILoggerProvider>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
     function AddProvider<T: ILoggerProvider>(ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
 
     function WithProperty(const Name: string; const Value: variant): TLoggerFactory; overload; // static properties ie. process id, correlation id etc.
@@ -209,6 +214,11 @@ type
 
     property ValueFormatter: TValueFormatter read FValueFormatter write FValueFormatter;
     property StateFormatter: TStateFormatter<TLogState> read FStateFormatter write FStateFormatter;
+
+
+    procedure HandleInternalException(const Exc: Exception); inline;
+
+    property OnException: TProc<Exception> read FOnException write FOnException;
   end;
 
 
@@ -793,11 +803,21 @@ destructor TLoggerFactory.Destroy;
 begin
   FStaticProps.Clear;
   FDynamicProps.Clear;
+
+  for var Provider in FProviders.Values do
+    Provider.Close;
+
   FProviders.Clear;
   FreeAndNil(FStaticProps);
   FreeAndNil(FDynamicProps);
   FreeAndNil(FProviders);
   inherited;
+end;
+
+procedure TLoggerFactory.HandleInternalException(const Exc: Exception);
+begin
+  if Assigned(FOnException) then
+    FOnException(Exc);
 end;
 
 initialization

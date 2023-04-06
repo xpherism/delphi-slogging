@@ -1,7 +1,5 @@
 unit SLogging.&File;
 
-{$R-,T-,X+,H+,B-}
-
 interface
 
 uses
@@ -12,44 +10,24 @@ uses
   System.Threading,
   System.Generics.Collections,
   SLogging,
-  SLogging.Utils;
+  SLogging.Utils,
+  SLogging.Utils.Queue;
+
+{$B-} // Enable boolean short-circuit code generation by the compiler
 
 type
   TFileLogger = class;
   TFileLoggerProvider = class;
 
-  // this record is used for a final snapshot of the entire log entry, used for queuing etc.
-  TLogFileEntry = record
-    Timestamp: TLogTime;
-    EventId: TEventId;
-    Level: TLogLevel;
-    MessageTemplate: string;
-    &Message: string;
-    Category: string;
-    Properties: TArray<TPair<string, variant>>;
-    Scopes: TArray<TLogState>;
-    &Exception: record
-      &Message: string;
-      StackTrace: string;
-    end;
-//    class operator Assign(var Dest: TLogState; const [ref] Src: TLogEntry);
-//    class operator Finalize(var Dest: TLogState);
-//    class operator Initialize(out Dest: TLogState);
-  end;
-
-  {* File Logger *}
-  TFileWriter = class;
-
-  TFileWriterCls = class of TFileWriter;
+  {* File Writer *}
 
   TFileWriter = class
-  private
+  protected
     FActiveFileName: String;
     FFile: TFileStream;
-  protected
     procedure EnsureFile(const FileName: string; Formatter: TFunc<string, string>); inline;
   public
-    procedure Write(const Entry: TLogFileEntry; const FileName: string; Formatter: TFunc<string, string>; const Encoding: TEncoding); virtual;
+    procedure WriteLine(const Line: String; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
   end;
 
   TFileLogger = class(TInterfacedObject, ILoggerImplementor)
@@ -59,71 +37,53 @@ type
     constructor Create(Provider: TFileLoggerProvider);
 
     function IsEnabled(const LogLevel: TLogLevel): boolean; inline;
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>); virtual;
-    procedure BeginScope(const State: TLogState); virtual;
-    procedure EndScope; virtual;
+    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>);
+    procedure BeginScope(const State: TLogState);
+    procedure EndScope;
   end;
 
-  TFileLoggerProvider = class(TInterfacedObject, ILoggerProvider)
+  TFileLoggerProviderBase = class abstract (TInterfacedObject, ILogQueueWorker<TLogEntry>)
   private
-    FEvent: TEvent;
-    FTask: ITask;
+    FQueue: TLogQueue<TLogEntry>;
+    FWriter: TFileWriter;
     FMinLevel: TLogLevel;
-    FLogger: ILoggerImplementor;
-    FQueue: TThreadedQueue<TLogFileEntry>;
     FEncoding: TEncoding;
     FFileName: String;
     FFilenameFormatter: TFunc<string, string>;
-    FMaxQueueTime: Integer;
-    FMinQueueSize: Integer; 
     procedure SetMinLevel(const Value: TLogLevel);
-    procedure StartWorker(Cls: TFileWriterCls);
+    function GetMaxQueueTime: Integer;
+    function GetMinQueueSize: Integer;
+    procedure SetMaxQueueTime(const Value: Integer);
+    procedure SetMinQueueSize(const Value: Integer);
+  protected
+    function Handle(const Entry: TLogEntry): Boolean; virtual; abstract;
+    property Queue: TLogQueue<TLogEntry> read FQueue;
+    property Writer: TFileWriter read FWriter;
   public
-    constructor Create;
+    constructor Create; virtual;
     destructor Destroy; override;
-
-    function CreateLogger(Category: string): ILoggerImplementor; virtual;
 
     property MinLevel: TLogLevel read FMinLevel write SetMinLevel;
     property FileName: string read FFilename write FFileName;
     property FileNameFormatter: TFunc<string, string> read FFilenameFormatter write FFilenameFormatter;
     property Encoding: TEncoding read FEncoding write FEncoding;
-    // <summary>flush queue if the number of entries X or more</summary>
-    property MaxQueueTime: Integer read FMaxQueueTime write FMaxQueueTime;
     // <summary>flush queue if more than X milliseconds since last write</summary>
-    property MinQueueSize: Integer read FMinQueueSize write FMinQueueSize;
+    property MaxQueueTime: Integer read GetMaxQueueTime write SetMaxQueueTime;
+    // <summary>flush queue if the number of entries X or more</summary>
+    property MinQueueSize: Integer read GetMinQueueSize write SetMinQueueSize;
   end;
 
-  {* JSON File Logger *}
-
-  TJsonFileLogger = class;
-  TJsonFileLoggerProvider = class;
-
-  TJsonFileWriter = class(TFileWriter)
-  public
-    procedure Write(const Entry: TLogFileEntry; const FileName: string; Formatter: TFunc<string, string>; const Encoding: TEncoding); override;
-  end;
-
-  TJsonFileLogger = class(TFileLogger)
-  public
-    constructor Create(Provider: TJsonFileLoggerProvider); reintroduce;
-
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>); override;
-    procedure BeginScope(const State: TLogState); override;
-    procedure EndScope; override;
-  end;
-
-  TJsonFileLoggerProvider = class(TFileLoggerProvider)
+  TFileLoggerProvider = class(TFileLoggerProviderBase, ILoggerProvider)
   private
-    FScopes: TThreadList<TLogState>;
-    FIncludeScopes: Boolean;
+    FLogger: ILoggerImplementor;
+  protected
+    function Handle(const Entry: TLogEntry): Boolean; override;
   public
-    constructor Create;
+    constructor Create; override;
     destructor Destroy; override;
 
-    function CreateLogger(Category: string): ILoggerImplementor; override;
-
-    property IncludeScopes: Boolean read FIncludeScopes write FIncludeScopes;
+    function CreateLogger(Category: string): ILoggerImplementor;
+    procedure Close;
   end;
 
 implementation
@@ -132,10 +92,6 @@ uses
 {$IFDEF MSWINDOWS}
   Winapi.Windows,
 {$ENDIF}
-  System.JSON.Types,
-  System.JSON.Utils,
-  System.JSON.Serializers,
-  System.JSON.Writers,
   System.Variants,
   System.VarUtils,
   System.DateUtils;
@@ -143,7 +99,7 @@ uses
 const
   LogLevelNames : array [TLogLevel.Trace..TLogLevel.None] of string = ('TRACE','DEBUG','INFO ','WARN ','ERROR','FATAL','NONE ');
 
-{ TLogFileWriter }
+{ TFileWriter }
 
 procedure TFileWriter.EnsureFile(const FileName: string; Formatter: TFunc<string, string>);
 var
@@ -182,44 +138,22 @@ begin
 {$ELSE}
     FActiveFileName := NewFileName;
     FFile := TFileStream.Create(FActiveFileName, fmOpenReadWrite or fmShareDenyWrite);
-    FFile.Seek(0, soFromEnd);    
+    FFile.Seek(0, soFromEnd);
 {$ENDIF}
   end;
 end;
 
-procedure TFileWriter.Write(const Entry: TLogFileEntry; const FileName: string; Formatter: TFunc<string, string>; const Encoding: TEncoding);
+
+procedure TFileWriter.WriteLine(const Line: string; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
 begin
-  EnsureFile(FileName, Formatter);
+  EnsureFile(FileName, FileNameFormatter);
 
-  var SB := TStringBuilder.Create;
+  var writer := TStreamWriter.Create(FFile, Encoding);
   try
-    SB.Append(entry.Timestamp.FormatISO8601);
-    SB.Append(' ');
-    SB.Append(LogLevelNames[entry.Level]);
-    SB.Append(' ');
-    SB.Append(entry.Category);
-    SB.Append('[');
-    SB.Append(entry.EventId.Id);
-    SB.Append('] ');
-    SB.Append(entry.Message);
-
-    if entry.Exception.Message <> '' then
-    begin
-      SB.Append(sLineBreak);
-      SB.Append(entry.Exception.Message);
-      SB.Append(sLineBreak);
-      SB.Append(entry.Exception.StackTrace);
-    end;
-
-    var writer := TStreamWriter.Create(FFile, Encoding);
-    try
-      writer.WriteLine(SB.ToString);
-      Writer.Flush;
-    finally
-      writer.Free;
-    end;
+    writer.WriteLine(Line);
+    Writer.Flush;
   finally
-    SB.Free;
+    writer.Free;
   end;
 end;
 
@@ -249,15 +183,12 @@ begin
   if not IsEnabled(LogLevel) then
     Exit;
 
-  FProvider.StartWorker(TFileWriter);
-
-  var Entry: TLogFileEntry;
+  var Entry: TLogEntry;
   Entry.MessageTemplate := State.MessageTemplate;
   Entry.Message := Formatter(State);
   Entry.Category := State.Category;
   Entry.Timestamp := TLogTime.UTC;
   Entry.Properties := State.Properties;
-//  Entry.Scopes := FProvider.FScopes;
   Entry.EventId := EventId;
   Entry.Level := LogLevel;
   if Exc <> nil then
@@ -266,25 +197,63 @@ begin
     Entry.Exception.StackTrace := exc.StackTrace;
   end;
 
-  FProvider.FQueue.PushItem(Entry);
-  FProvider.FEvent.SetEvent;
+  FProvider.FQueue.Enqueue(Entry);
+end;
+
+{ TFileLoggerProviderBase }
+
+constructor TFileLoggerProviderBase.Create;
+begin
+  inherited;
+  FWriter := TFileWriter.Create;
+  FQueue := TLogQueue<TLogEntry>.Create(Self);
+  FMinLevel := TLogLevel.Information;
+  FEncoding := TEncoding.UTF8;
+end;
+
+destructor TFileLoggerProviderBase.Destroy;
+begin
+  FreeAndNil(FQueue);
+  FreeAndNil(FWriter);
+  inherited;
+end;
+
+function TFileLoggerProviderBase.GetMaxQueueTime: Integer;
+begin
+  Result := FQueue.MaxQueueTime;
+end;
+
+function TFileLoggerProviderBase.GetMinQueueSize: Integer;
+begin
+  Result := FQueue.MinQueueSize;
+end;
+
+procedure TFileLoggerProviderBase.SetMaxQueueTime(const Value: Integer);
+begin
+  FQueue.MaxQueueTime := Value;
+end;
+
+procedure TFileLoggerProviderBase.SetMinLevel(const Value: TLogLevel);
+begin
+  FMinLevel := Value;
+end;
+
+procedure TFileLoggerProviderBase.SetMinQueueSize(const Value: Integer);
+begin
+  FQueue.MinQueueSize := Value;
 end;
 
 { TFileLoggerProvider }
 
+procedure TFileLoggerProvider.Close;
+begin
+  Queue.Close;
+end;
+
 constructor TFileLoggerProvider.Create;
 begin
   inherited;
-
-  FEvent := TEvent.Create;
-  FEvent.ResetEvent;
-
   FLogger := TFileLogger.Create(Self);
-  FMinLevel := TLogLevel.Information;
-  FQueue := TThreadedQueue<TLogFileEntry>.Create(64);
-  FEncoding := TEncoding.UTF8;
-  FMinQueueSize := 16;   // flush when queue reaching 16 entries
-  FMaxQueueTime := 1000; // wait a maximum of 1000 milliseconds before flushing queue
 end;
 
 function TFileLoggerProvider.CreateLogger(Category: string): ILoggerImplementor;
@@ -294,231 +263,38 @@ end;
 
 destructor TFileLoggerProvider.Destroy;
 begin
-  FTask.Cancel;
-  while FTask <> nil do
-    CheckSynchronize(1000);
-
   FLogger := nil;
-  FreeAndNil(FEvent);
-
   inherited;
 end;
 
-procedure TFileLoggerProvider.StartWorker(Cls: TFileWriterCls);
+function TFileLoggerProvider.Handle(const Entry: TLogEntry): Boolean;
 begin
-  if FTask <> nil then
-    Exit;
+  var SB := TStringBuilder.Create;
+  try
+    SB.Append(entry.Timestamp.FormatISO8601);
+    SB.Append(' ');
+    SB.Append(LogLevelNames[entry.Level]);
+    SB.Append(' ');
+    SB.Append(entry.Category);
+    SB.Append('[');
+    SB.Append(entry.EventId.Id);
+    SB.Append('] ');
+    SB.Append(entry.Message);
 
-  FTask := TTask.Create(
-    procedure
+    if entry.Exception.Message <> '' then
     begin
-      try
-        var Writer := Cls.Create;
-        try
-          var LastWriteTs := Now;
-          
-          repeat
-            case FEvent.WaitFor(100) of
-              wrTimeout:
-                ;      // check
-              wrAbandoned:
-                break; // If TEvent is destroyed
-              wrError:
-                RaiseLastOSError;
-              wrSignaled:
-                FEvent.ResetEvent;
-            end;
-
-            if (MilliSecondsBetween(Now, LastWriteTs) >= FMaxQueueTime) or (FQueue.QueueSize >= FMinQueueSize) or (FTask.Status = TTaskStatus.Canceled) then
-              while FQueue.QueueSize > 0 do
-              begin
-                Writer.Write(FQueue.PopItem, FileName, FileNameFormatter, Encoding);                
-                LastWriteTs := Now;
-              end;              
-          until FTask.Status = TTaskStatus.Canceled;
-        finally
-          FreeAndNil(Writer);
-        end;
-      finally
-        TThread.Queue(nil,
-          procedure begin
-            FTask := nil;
-          end
-        );
-      end;
-    end
-  );
-  
-  FTask.Start;
-end;
-
-procedure TFileLoggerProvider.SetMinLevel(const Value: TLogLevel);
-begin
-  FMinLevel := Value;
-end;
-
-{ TJSONLogFileWriter }
-
-procedure TJsonFileWriter.Write(const Entry: TLogFileEntry;
-  const FileName: string; Formatter: TFunc<string, string>;
-  const Encoding: TEncoding);
-begin
-  EnsureFile(FileName, Formatter);
-
-  var SR := TStringStream.Create;
-  var JB := TJsonTextWriter.Create(TStreamWriter.Create(SR), True);
-  try
-    JB.WriteStartObject;
-
-    JB.WritePropertyName('timestamp');
-    JB.WriteValue(Entry.Timestamp.FormatISO8601);
-    JB.WritePropertyName('logLevel');
-    JB.WriteValue(JsonLogLevelNames[entry.Level]);
-
-    JB.WritePropertyName('category');
-    JB.WriteValue(Entry.Category);
-
-    JB.WritePropertyName('eventId');
-    JB.WriteEventId(Entry.EventId);
-
-    if Entry.Exception.Message <> '' then
-    begin
-      JB.WritePropertyName('exception');
-      JB.WriteStartObject;
-      JB.WritePropertyName('message');
-      JB.WriteValue(Entry.Exception.Message);
-
-      JB.WritePropertyName('stackTrace');
-      JB.WriteValue(Entry.Exception.StackTrace);
-      JB.WriteEndObject;
+      SB.Append(sLineBreak);
+      SB.Append(entry.Exception.Message);
+      SB.Append(sLineBreak);
+      SB.Append(entry.Exception.StackTrace);
     end;
 
-    JB.WritePropertyName('message');
-    JB.WriteValue(Entry.Message);
-
-    JB.WritePropertyName('messageTemplate');
-    JB.WriteValue(Entry.MessageTemplate);
-
-    JB.WritePropertyName('properties');
-    JB.WriteProperties(Entry.Properties);
-
-    JB.WritePropertyName('scopes');
-    JB.WriteStartArray;
-    for var Scope in Entry.Scopes do
-      JB.WriteScope(Scope);
-    JB.WriteEndArray;
-
-    JB.WriteEndObject;
-    JB.Flush;
-
-    var writer := TStreamWriter.Create(FFile, Encoding);
-    try
-      writer.WriteLine(SR.DataString);
-      Writer.Flush;
-    finally
-      writer.Free;
-    end;
+    Writer.WriteLine(SB.ToString, FileName, FileNameFormatter, Encoding);
   finally
-    JB.Free;
-    SR.Free;
-  end;
-end;
-
-{ TJSONFileLoggerProvider }
-
-constructor TJsonFileLoggerProvider.Create;
-begin
-  inherited;
-
-  FScopes := TThreadList<TLogState>.Create;
-  FLogger := TJsonFileLogger.Create(Self);
-  FIncludeScopes := False;
-end;
-
-function TJsonFileLoggerProvider.CreateLogger(Category: string): ILoggerImplementor;
-begin
-  Result := FLogger;
-end;
-
-destructor TJsonFileLoggerProvider.Destroy;
-begin
-  FLogger := nil;
-
-  var L := FScopes.LockList;
-  try
-    L.Clear;
-  finally
-    FScopes.UnlockList;
+    SB.Free;
   end;
 
-  FreeAndNil(FScopes);
-
-  inherited;
-end;
-
-{ TJsonFileLogger }
-
-constructor TJsonFileLogger.Create(Provider: TJsonFileLoggerProvider);
-begin
-  FProvider := Provider;
-end;
-
-procedure TJsonFileLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>);
-begin
-  if not IsEnabled(LogLevel) then
-    Exit;
-
-  FProvider.StartWorker(TJsonFileWriter);
-
-  var Entry: TLogFileEntry;
-  Entry.MessageTemplate := State.MessageTemplate;
-  Entry.Message := Formatter(State);
-  Entry.Category := State.Category;
-  Entry.Timestamp := TLogTime.UTC;
-  Entry.Properties := State.Properties;
-
-  if TJsonFileLoggerProvider(FProvider).IncludeScopes then
-  begin
-    var L := TJsonFileLoggerProvider(FProvider).FScopes.LockList;
-    SetLength(Entry.Scopes, L.Count);
-    try
-      for var I := 0 to L.Count-1 do
-        Entry.Scopes[I] := L[I];
-    finally
-      TJsonFileLoggerProvider(FProvider).FScopes.UnlockList;
-    end;
-  end;
-
-  Entry.EventId := EventId;
-  Entry.Level := LogLevel;
-  if Exc <> nil then
-  begin
-    Entry.Exception.Message := Exc.ToString;
-    Entry.Exception.StackTrace := exc.StackTrace;
-  end;
-
-  FProvider.FQueue.PushItem(Entry);
-  FProvider.FEvent.SetEvent;
-end;
-
-procedure TJsonFileLogger.BeginScope(const State: TLogState);
-begin
-  var L := TJsonFileLoggerProvider(FProvider).FScopes.LockList;
-  try
-    L.Add(State);
-  finally
-    TJsonFileLoggerProvider(FProvider).FScopes.UnlockList;
-  end;
-end;
-
-procedure TJsonFileLogger.EndScope;
-begin
-  var L := TJsonFileLoggerProvider(FProvider).FScopes.LockList;
-  try
-    L.Delete(L.Count-1);
-  finally
-    TJsonFileLoggerProvider(FProvider).FScopes.UnlockList;
-  end;
+  Result := True;
 end;
 
 end.
