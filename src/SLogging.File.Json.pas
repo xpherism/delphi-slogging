@@ -41,7 +41,7 @@ type
     FScopes: TThreadList<TLogState>;
     FIncludeScopes: Boolean;
   protected
-    function Handle(const Entry: TLogEntry): Boolean; override;
+    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; override;
   public
     constructor Create; override;
     destructor Destroy; override;
@@ -101,7 +101,7 @@ begin
   Queue.Close;
 end;
 
-function TJsonFileLoggerProvider.Handle(const Entry: TLogEntry): Boolean;
+function TJsonFileLoggerProvider.HandleDequeue(const [ref] Entry: TLogEntry): Boolean;
 begin
   var SR := TStringStream.Create;
   var JB := TJsonTextWriter.Create(TStreamWriter.Create(SR), True);

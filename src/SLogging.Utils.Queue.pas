@@ -14,7 +14,7 @@ uses
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
 type
-  // this record is used for a final snapshot of the entire log entry, used for queuing etc.
+  // this record is used for a final snapshot of an entire log entry
   TLogEntry = record
     Timestamp: TLogTime;
     EventId: TEventId;
@@ -28,14 +28,10 @@ type
       &Message: string;
       StackTrace: string;
     end;
-//    class operator Assign(var Dest: TLogState; const [ref] Src: TLogEntry);
-//    class operator Finalize(var Dest: TLogState);
-//    class operator Initialize(out Dest: TLogState);
   end;
 
   ILogQueueWorker<T> = interface
-    // IMPORTANT! This is called async
-    function Handle(const Entry: T): Boolean;
+    function HandleDequeue(const [ref] Entry: T): Boolean;
   end;
 
   TLogQueue<T> = class
@@ -47,17 +43,19 @@ type
     FMinQueueSize: Integer;
     FMaxQueueTime: Integer;
     FWorker: ILogQueueWorker<T>;
+    FOnWorkerError: TProc<Exception>;
     procedure EnsureWorker;
+    procedure HandleWorkerError(Exc: Exception); inline;
   public
     constructor Create(Worker: ILogQueueWorker<T>);
     destructor Destroy; override;
     procedure Close;
 
     procedure Enqueue(const [ref] Entry: T);
-//    function Dequeue: T;
 
     property MinQueueSize: Integer read FMinQueueSize write FMinQueueSize;
     property MaxQueueTime: Integer read FMaxQueueTime write FMaxQueueTime; // milliseconds
+    property OnWorkerError: TProc<Exception> read FOnWorkerError write FOnWorkerError;
   end;
 
 implementation
@@ -144,7 +142,7 @@ begin
                 // How to best handle writer errors? how many retries to dequeue? should we throw away log messages?
                 TMonitor.Enter(FLock);
                 try
-                  if FWorker.Handle(FQueue.Peek) then
+                  if FWorker.HandleDequeue(FQueue.Peek) then
                     FQueue.Dequeue;
                 finally
                   TMonitor.Exit(FLock);
@@ -152,8 +150,8 @@ begin
                 LastWriteTs := Now;
               end;
 
-          except on E:Exception do
-            LoggerFactory.HandleInternalException(E); //FIXME
+          except on E: Exception do
+            HandleWorkerError(E);
           end;
         until FTask.Status = TTaskStatus.Canceled;
       finally
@@ -167,6 +165,12 @@ begin
   );
 
   FTask.Start;
+end;
+
+procedure TLogQueue<T>.HandleWorkerError(Exc: Exception);
+begin
+  if Assigned(FOnWorkerError) then
+    FOnWorkerError(Exc);
 end;
 
 end.

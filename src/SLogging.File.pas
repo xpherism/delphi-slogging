@@ -56,7 +56,7 @@ type
     procedure SetMaxQueueTime(const Value: Integer);
     procedure SetMinQueueSize(const Value: Integer);
   protected
-    function Handle(const Entry: TLogEntry): Boolean; virtual; abstract;
+    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; virtual; abstract;
     property Queue: TLogQueue<TLogEntry> read FQueue;
     property Writer: TFileWriter read FWriter;
   public
@@ -77,7 +77,7 @@ type
   private
     FLogger: ILoggerImplementor;
   protected
-    function Handle(const Entry: TLogEntry): Boolean; override;
+    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; override;
   public
     constructor Create; override;
     destructor Destroy; override;
@@ -207,6 +207,11 @@ begin
   inherited;
   FWriter := TFileWriter.Create;
   FQueue := TLogQueue<TLogEntry>.Create(Self);
+  FQueue.OnWorkerError :=
+    procedure (Exc: Exception)
+    begin
+      LoggerFactory.HandleInternalException(Exc);
+    end;
   FMinLevel := TLogLevel.Information;
   FEncoding := TEncoding.UTF8;
 end;
@@ -267,7 +272,7 @@ begin
   inherited;
 end;
 
-function TFileLoggerProvider.Handle(const Entry: TLogEntry): Boolean;
+function TFileLoggerProvider.HandleDequeue(const [ref] Entry: TLogEntry): Boolean;
 begin
   var SB := TStringBuilder.Create;
   try
