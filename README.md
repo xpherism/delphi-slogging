@@ -1,11 +1,15 @@
-# delphi-slogging
+# delphi-slogging (WIP)
 Delphi structured logging framework inspired by .NET logging framework.
 
-Features includede
+Features include
 
 - Message Templates
 - Scopes
 - Static and dynamic properties (enrichment)
+
+Compiled and tested using Delphi 10.4.2
+
+TODO Add test cases
 
 ## Example
 
@@ -64,7 +68,7 @@ end;
 logger.LogInformation('Backend stopped', []);
 ```
 
-All logging is handled synchronously, and any implementation of loggers should be fast enough to not be a performance bottle neck. Any logger write to possible slow IO, should use a queue to buffer messages, and handle those async. fx. See TFileLogger for example.
+All logging is handled synchronously, and any ILoggerImplementor implementation must handle any async queing or buffering manuelly, see TFileLogger for an example.
 
 Note that the `FileNameFormatter` callback use used for each log entry and will impact performance (ie. don't database or any other heave calculation or lookups). The same is true for dynamic properties 
 
