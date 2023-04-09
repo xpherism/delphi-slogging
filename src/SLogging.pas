@@ -5,13 +5,10 @@ unit SLogging;
 
   Important notes!
 
-  TLogState if passed by reference but is allocated on the stack.
+  TLogState is passed by reference but is allocated on the stack.
   Any ILoggerImplementor that involves async operations (ie. queuing) must
   make a copy (ie. assign to stack local variable or allocate on heap).
 *}
-
-//{$R-,T-,X+,H+,B-}
-
 
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
@@ -21,7 +18,8 @@ uses
   System.Variants,
   System.SysUtils,
   System.Classes,
-  System.Generics.Collections;
+  System.Generics.Collections,
+  SLogging.Utils;
 
 type
   {$SCOPEDENUMS ON}
@@ -56,6 +54,33 @@ type
     property Name: string read FName;
   end;
 
+  TValueFormatter<T> = reference to function(const Fmt: string; const [ref] Value: T): string;
+
+  // When using structured logging the same message template is used multiple times
+  // Using a TMessageTemplate we can cache these, save time normally spent parsing
+  // Template message format: {Name[:format]} => format is passed to formatter function
+  TMessageTemplate = class
+  private type
+    TSpan = record
+      &Type: (Text, Value, LBrace, RBrace);
+      Start: Integer;
+      Length: Integer;
+      FmtPos: Integer;
+    end;
+  private
+    FCount: Integer;
+    FSpans: TArray<TSpan>;
+    FTemplate: string;
+    procedure Parse;
+  public
+    constructor Create(const Template: string);
+    destructor Destroy; override;
+
+    class function Format<T>(const Template: String; const Args: array of T; const Formatter: TValueFormatter<T>; const Values: TDictionary<string, T>): String; overload;
+    function Format<T>(const Args: array of T; const Formatter: TValueFormatter<T>; const Values: TDictionary<string, T>): String; overload;
+    property Template: string read FTemplate;
+  end;
+
   // Delphi interfaces does not support generic function.
   // Use inheritance to override instead
   // Default log state that supports message templates
@@ -65,18 +90,13 @@ type
     FMessageTemplate: string;
     FMessage: string;
     FCategory: string;
-    FProperties: TArray<TPair<string, variant>>;
+    FProperties: TArray<TPair<string, Variant>>;
   public
-//    class operator Finalize(var Dest: TLogState);
-//    class operator Initialize(out Dest: TLogState);
-
     property MessageTemplate: string read FMessageTemplate;
     property Message: string read FMessage;
     property Category: string read FCategory;
-    property Properties: TArray<TPair<string, variant>> read FProperties;
+    property Properties: TArray<TPair<string, Variant>> read FProperties;
   end;
-
-  TValueFormatter = reference to function(const Fmt: string; const Value: variant): string;
 
   // Exception is not provided as an argument to Formatters (https://github.com/aspnet/Logging/issues/442)
   TStateFormatter<T> = reference to function(const [ref] State: T): string;
@@ -105,40 +125,40 @@ type
 
   ILogger = interface
     function IsEnabled(const LogLevel: TLogLevel): boolean;
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant);
-    procedure BeginScope(const MessageTemplate: string; const Args: array of variant);
+    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant);
+    procedure BeginScope(const MessageTemplate: string; const Args: array of Variant);
     procedure EndScope;
 
     // helper methods
-    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const MessageTemplate: string; const Args: array of Variant); overload;
   end;
 
   TLogger = class(TInterfacedObject, ILogger)
@@ -147,39 +167,39 @@ type
     constructor Create(const Category: string);
   public
     function IsEnabled(const LogLevel: TLogLevel): boolean;
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant);
-    procedure BeginScope(const MessageTemplate: string; const Args: array of variant);
+    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant);
+    procedure BeginScope(const MessageTemplate: string; const Args: array of Variant);
     procedure EndScope;
 
-    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogTrace(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogTrace(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogDebug(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogDebug(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogInformation(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogInformation(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogWarning(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogWarning(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogError(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogError(const MessageTemplate: string; const Args: array of Variant); overload;
 
-    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: array of variant); overload;
-    procedure LogCritical(const MessageTemplate: string; const Args: array of variant); overload;
+    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: array of Variant); overload;
+    procedure LogCritical(const MessageTemplate: string; const Args: array of Variant); overload;
   end;
 
   ILogger<T> = interface(ILogger)
@@ -190,16 +210,15 @@ type
     constructor Create; reintroduce;
   end;
 
-
   TLoggerFactory = class
   private
     FProviders: TDictionary<string, ILoggerProvider>;
-    FStaticProps: TDictionary<string, variant>;
-    FDynamicProps: TList<TProc<TDictionary<string, variant>>>;
-    FValueFormatter: TValueFormatter;
+    FStaticProps: TDictionary<string, Variant>;
+    FDynamicProps: TList<TProc<TDictionary<string, Variant>>>;
+    FValueFormatter: TValueFormatter<Variant>;
     FStateFormatter: TStateFormatter<TLogState>;
     FOnException: TProc<Exception>;
-    function AddProvider<T: ILoggerProvider>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
+    function AddProvider<T: ILoggerProvider, constructor>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
   public
     constructor Create;
     destructor Destroy; override;
@@ -207,12 +226,14 @@ type
     function CreateLogger<T>: ILogger<T>; overload;
     function CreateLogger(const Category: string): ILogger; overload;
 
-    function AddProvider<T: ILoggerProvider>(ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
+    function AddProvider<T: ILoggerProvider, constructor>(ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
 
-    function WithProperty(const Name: string; const Value: variant): TLoggerFactory; overload; // static properties ie. process id, correlation id etc.
-    function WithProperty(const Proc: TProc<TDictionary<string, variant>>): TLoggerFactory; overload; // dynamic properties called on every log event, thread id,
+    // static properties ie. process id, correlation id etc.
+    function WithProperty(const Name: string; const Value: Variant): TLoggerFactory; overload;
+    // dynamic properties called on every log event, thread id,
+    function WithProperty(const Proc: TProc<TDictionary<string, Variant>>): TLoggerFactory; overload;
 
-    property ValueFormatter: TValueFormatter read FValueFormatter write FValueFormatter;
+    property ValueFormatter: TValueFormatter<Variant> read FValueFormatter write FValueFormatter;
     property StateFormatter: TStateFormatter<TLogState> read FStateFormatter write FStateFormatter;
 
 
@@ -221,11 +242,8 @@ type
     property OnException: TProc<Exception> read FOnException write FOnException;
   end;
 
-
-  function DefaultValueFormatter(const Fmt: string; const Value: variant): string; inline;
+  function DefaultValueFormatter(const Fmt: string; const [ref] Value: Variant): string; inline;
   function DefaultStateFormatter(const [ref] State: TLogState): string; inline;
-
-  function FormatMessageTemplate(const MessageTemplate: string; const Args: array of variant; const Properties: TDictionary<string, variant>): string;
 
 var
   LoggerFactory: TLoggerFactory = nil;
@@ -300,15 +318,96 @@ begin
 {$ENDIF}
 end;
 
-// This should never throw an exception
-// Template message format: {Name[:format]} => format is passed to formatter function
-function FormatMessageTemplate(const MessageTemplate: string;
-  const Args: array of variant;
-  const Properties: TDictionary<string, variant>): string;
+{ TMessageTemplate }
+
+constructor TMessageTemplate.Create(const Template: string);
+begin
+  SetLength(FSpans, 8);
+
+  FCount := 0;
+  FTemplate := Template;
+  try
+    Parse;
+  except
+    SetLength(FSpans, 0);
+    raise;
+  end;
+end;
+
+destructor TMessageTemplate.Destroy;
+begin
+  SetLength(FSpans, 0);
+  inherited;
+end;
+
+class function TMessageTemplate.Format<T>(const Template: String; const Args: array of T; const Formatter: TValueFormatter<T>; const Values: TDictionary<string, T>): String;
+begin
+  var TM := TMessageTemplate.Create(Template);
+  try
+    Result := TM.Format<T>(Args, Formatter, Values);
+  finally
+    TM.Free;
+  end;
+end;
+
+function TMessageTemplate.Format<T>(const Args: array of T; const Formatter: TValueFormatter<T>; const Values: TDictionary<string, T>): String;
+begin
+  var B := TStringBuilder.Create(FTemplate.Length);
+  try
+    var ArgNum := 0;
+    for var I := 0 to FCount-1 do
+    begin
+      case FSpans[I].&Type of
+        Text:
+          B.Append(FTemplate, FSpans[I].Start-1, FSpans[I].Length);
+        LBrace:
+          B.Append('{');
+        RBrace:
+          B.Append('}');
+        Value: begin
+          var Name: string;
+          var Value: T;
+          var ValueFmt: string;
+          var FormattedValue: string;
+
+          if ArgNum < Length(Args) then
+            Value := Args[ArgNum]
+          else
+            Value := Default(T);
+
+          if FSpans[I].FmtPos <> -1 then
+          begin
+            Name := Copy(Template, FSpans[I].Start+1, FSpans[I].FmtPos-FSpans[I].Start-1);
+            ValueFmt := Copy(Template, FSpans[I].FmtPos+2, FSpans[I].Length-(FSpans[I].FmtPos-FSpans[I].Start));
+          end
+          else
+          begin
+            Name := Copy(Template, FSpans[I].Start+1, FSpans[I].Length-2);
+            ValueFmt := '';
+          end;
+
+          FormattedValue := Formatter(ValueFmt, Value);
+
+          if Values <> nil then
+            Values.AddOrSetValue(Name, Value);
+
+          B.Append(FormattedValue);
+
+          Inc(ArgNum);
+        end;
+      end;
+    end;
+    Result := B.ToString;
+  finally
+    B.Free;
+  end;
+end;
+
+procedure TMessageTemplate.Parse;
 type
   TState = (Scan, TextDone, ArgScan, ArgFail, ArgDone, Done);
 
-  function FindIndexOf(str: string; needle: char; fromIndex, toIndex: integer): integer; inline;
+  function FindIndexOf(const [ref] str: string; needle: char; fromIndex, toIndex: integer): integer; inline;
   begin
     Result := -1;
     for var I := fromIndex to toIndex do
@@ -316,118 +415,137 @@ type
         Exit(I);
   end;
 
-begin
-  var L := MessageTemplate.Length;
+  procedure AppendLBrace(Start, Length: Integer);
+  begin
+    if System.Length(FSpans) >= FCount then
+      SetLength(FSpans, System.Length(FSpans)+4);
 
-  if L = 0 then Exit('');
+    FSpans[FCount].&Type := LBrace;
+    FSpans[FCount].Start := Start;
+    FSpans[FCount].Length := Length;
+    FSpans[FCount].FmtPos := -1;
+    Inc(FCount);
+  end;
+
+  procedure AppendRBrace(Start, Length: Integer);
+  begin
+    if System.Length(FSpans) >= FCount then
+      SetLength(FSpans, System.Length(FSpans)+4);
+
+    FSpans[FCount].&Type := RBrace;
+    FSpans[FCount].Start := Start;
+    FSpans[FCount].Length := Length;
+    FSpans[FCount].FmtPos := -1;
+    Inc(FCount);
+  end;
+
+  procedure AppendText(Start, Length: Integer);
+  begin
+    if System.Length(FSpans) >= FCount then
+      SetLength(FSpans, System.Length(FSpans)+4);
+
+    FSpans[FCount].&Type := Text;
+    FSpans[FCount].Start := Start;
+    FSpans[FCount].Length := Length;
+    FSpans[FCount].FmtPos := -1;
+    Inc(FCount);
+  end;
+
+  procedure AppendValue(Name: String; Start, Length, FmtPos: Integer);
+  begin
+    if System.Length(FSpans) >= FCount then
+      SetLength(FSpans, System.Length(FSpans)+4);
+
+    FSpans[FCount].&Type := Value;
+    FSpans[FCount].Start := Start;
+    FSpans[FCount].Length := Length;
+    FSpans[FCount].FmtPos := FmtPos;
+
+    Inc(FCount);
+  end;
+
+begin
+  var L := FTemplate.Length;
+
+  if L = 0 then Exit;
 
   var state := TState.Scan;
-
   var T1 := 1;
   var T2 := 1;
-  var AN := 0;
 
-  var B := TStringBuilder.Create(L);
-  try
+  while State <> TState.Done do
+  begin
+    case state of
 
-    while State <> TState.Done do
-    begin
-      case state of
-
-        TState.Scan: begin
-          // {{ (escaped {)
-          if (MessageTemplate[T2] = '{') and (T2+1 <= L) and (MessageTemplate[T2+1] = MessageTemplate[T2]) then
-          begin
-            B.Append(MessageTemplate, T1-1, T2-T1+1);
-            T1 := T2+2;
-            T2 := T1;
-          end
-          // }} (escaped })
-          else if (MessageTemplate[T2] = '}') and (T2+1 <= L) and (MessageTemplate[T2+1] = MessageTemplate[T2]) then
-          begin
-            B.Append(MessageTemplate, T1-1, T2-T1+1);
-            T1 := T2+2;
-            T2 := T1;
-          end
-          // { start argument parsing
-          else if (MessageTemplate[T2] = '{')  then
-          begin
-            B.Append(MessageTemplate, T1-1, T2-T1);
-            T1 := T2+1;
-            T2 := T1;
-            State := TState.ArgScan;
-          end
-          // no more characters we are done
-          else if (T2 > L) then
-          begin
-            B.Append(MessageTemplate, T1-1, T2-T1);
-            break;
-          end
-          else
-            Inc(T2);
-        end;
-
-        TState.ArgScan: begin
-          if T2 > L then
-            state := TState.Scan
-          else if MessageTemplate[T2] = '}' then
-            state := TState.ArgDone
-          else if MessageTemplate[T2] = '{' then
-            state := TState.Scan
-          else
-            Inc(T2);
-        end;
-
-        TState.ArgDone: begin
-          var Name: string;
-          var Value: variant;
-          var ValueFmt: string;
-          var FormattedValue: string;
-
-          if AN < Length(Args) then
-            Value := Args[AN]
-          else
-            Value := NULL;
-
-          var Index := FindIndexOf(MessageTemplate, ':', T1, T2);
-          if Index <> -1 then
-          begin
-            Name := Copy(MessageTemplate, T1, Index-T1);
-            ValueFmt := Copy(MessageTemplate, Index+1, T2-Index-1);
-          end
-          else
-          begin
-            Name := Copy(MessageTemplate, T1, T2-T1);
-            ValueFmt := '';
-          end;
-
-          FormattedValue := LoggerFactory.ValueFormatter(ValueFmt, Value);
-
-          if Properties <> nil then
-            Properties.AddOrSetValue(Name, Value);
-
-          B.Append(FormattedValue);
-          Inc(AN);
-
+      TState.Scan: begin
+        // {{ (escaped {)
+        if (FTemplate[T2] = '{') and (T2+1 <= L) and (FTemplate[T2+1] = FTemplate[T2]) then
+        begin
+          AppendText(T1, T2-T1);
+          AppendLBrace(T2, 2);
+          T1 := T2+2;
+          T2 := T1;
+        end
+        // }} (escaped })
+        else if (FTemplate[T2] = '}') and (T2+1 <= L) and (FTemplate[T2+1] = FTemplate[T2]) then
+        begin
+          AppendText(T1, T2-T1);
+          AppendRBrace(T2, 2);
+          T1 := T2+2;
+          T2 := T1;
+        end
+        // { start argument parsing
+        else if (FTemplate[T2] = '{')  then
+        begin
+          AppendText(T1, T2-T1);
           T1 := T2+1;
           T2 := T1;
+          State := TState.ArgScan;
+        end
+        // no more characters we are done
+        else if (T2 > L) then
+        begin
+          if T2 > T1 then
+            AppendText(T1, T2-T1);
+          break;
+        end
+        else
+          Inc(T2);
+      end;
 
-          state := TState.Scan;
-        end;
+      TState.ArgScan: begin
+        if T2 > L then
+          state := TState.Scan
+        else if FTemplate[T2] = '}' then
+          state := TState.ArgDone
+        else if FTemplate[T2] = '{' then
+          state := TState.Scan
+        else
+          Inc(T2);
+      end;
+
+      TState.ArgDone: begin
+        var Index := FindIndexOf(Template, ':', T1, T2);
+        if Index <> -1 then
+          AppendValue(Copy(Template, T1, Index-T1), T1-1, T2-T1+2, Index)
+        else
+          AppendValue(Copy(Template, T1, T2-T1), T1-1, T2-T1+2, Index);
+
+        T1 := T2+1;
+        T2 := T1;
+
+        state := TState.Scan;
       end;
     end;
-
-    Result := B.ToString;
-  finally
-    B.Free;
   end;
 end;
 
-function DefaultValueFormatter(const Fmt: string; const Value: Variant): string;
+
+function DefaultValueFormatter(const Fmt: string; [ref] const Value: Variant): string;
 begin
   if Fmt <> '' then
     case VarType(Value) of
-      varEmpty: Result := '';
+      varEmpty: Result := '(null)';
       varNull: Result := '(null)';
       varSmallInt: Result := Format(Fmt, [TVarData(Value).VSmallInt]);
       varInteger: Result := Format(Fmt, [TVarData(Value).VInteger]);
@@ -448,7 +566,7 @@ begin
       else
         Result := VarToStr(Value);
     end
-  else if Value = NULL then
+  else if (Value = NULL) or (Value = Unassigned) then
     Result := '(null)'
   else
     Result := VarToStr(Value);
@@ -498,15 +616,16 @@ begin
   FCategory := Category;
 end;
 
-procedure TLogger.BeginScope(const MessageTemplate: string; const Args: array of variant);
+procedure TLogger.BeginScope(const MessageTemplate: string; const Args: array of Variant);
 begin
   var state: TLogState;
   state.FCategory := FCategory;
   state.FMessageTemplate := MessageTemplate;
 
-  var props := TDictionary<string, variant>.Create;
+  var props := TDictionary<string, Variant>.Create;
   try
-    state.FMessage := FormatMessageTemplate(MessageTemplate, Args, props);
+    // TODO cache TMessageTemplate
+    state.FMessage := TMessageTemplate.Format<Variant>(MessageTemplate, Args, LoggerFactory.ValueFormatter, props);
     state.FProperties := props.ToArray;
   finally
     props.Free;
@@ -532,15 +651,16 @@ begin
   Result := False;
 end;
 
-procedure TLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of variant);
+procedure TLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: array of Variant);
 begin
   var state: TLogState;
   state.FCategory := FCategory;
   state.FMessageTemplate := MessageTemplate;
 
-  var props := TDictionary<string, variant>.Create;
+  var props := TDictionary<string, Variant>.Create;
   try
-    state.FMessage := FormatMessageTemplate(MessageTemplate, Args, props);
+    // TODO Cache TMessageTemplates
+    state.FMessage := TMessageTemplate.Format<Variant>(MessageTemplate, Args, LoggerFactory.ValueFormatter, props);
 
     // Add static properties
     for var prop in LoggerFactory.FStaticProps do
@@ -556,176 +676,163 @@ begin
   end;
 
   for var Provider in LoggerFactory.FProviders.Values do
-    Provider.CreateLogger(FCategory).Log(LogLevel, EventId, Exc, state, DefaulTStateFormatter);
+    Provider.CreateLogger(FCategory).Log(LogLevel, EventId, Exc, state, DefaultStateFormatter);
 end;
 
 procedure TLogger.LogCritical(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Critical, 0, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogCritical(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Critical, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogCritical(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Critical, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogCritical(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Critical, EventId, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogDebug(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Debug, EventId, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogDebug(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Debug, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogDebug(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Debug, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogDebug(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Debug, 0, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogError(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Error, 0, Nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogError(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Error, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogError(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Error, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogError(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Error, EventId, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogInformation(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Information, 0, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogInformation(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Information, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogInformation(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Information, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogInformation(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Information, EventId, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogTrace(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Trace, EventId, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogTrace(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Trace, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogTrace(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Trace, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogTrace(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Trace, 0, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogWarning(const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Warning, 0, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogWarning(const Exc: Exception;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Warning, 0, Exc, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogWarning(const EventId: TEventId;
-  const MessageTemplate: string; const Args: array of variant);
+  const MessageTemplate: string; const Args: array of Variant);
 begin
   Log(TLogLevel.Warning, EventId, nil, MessageTemplate, Args);
 end;
 
 procedure TLogger.LogWarning(const EventId: TEventId;
   const Exc: Exception; const MessageTemplate: string;
-  const Args: array of variant);
+  const Args: array of Variant);
 begin
   Log(TLogLevel.Warning, EventId, Exc, MessageTemplate, Args);
 end;
 
-{ TLogState }
-
-//class operator TLogState.Finalize(var Dest: TLogState);
-//begin
-//  WriteLn(Format('Finalize %p', [@Dest]));
-//end;
-
-//class operator TLogState.Initialize(out Dest: TLogState);
-//begin
-//  WriteLn(Format('Initialize %p', [@Dest]));
-//end;
-
-
 { TLoggerFactory }
 
 function TLoggerFactory.WithProperty(
-  const Proc: TProc<TDictionary<string, variant>>): TLoggerFactory;
+  const Proc: TProc<TDictionary<string, Variant>>): TLoggerFactory;
 begin
   Result := Self;
 
@@ -733,7 +840,7 @@ begin
 end;
 
 function TLoggerFactory.WithProperty(const Name: string;
-  const Value: variant): TLoggerFactory;
+  const Value: Variant): TLoggerFactory;
 begin
   Result := Self;
 
@@ -742,29 +849,7 @@ end;
 
 function TLoggerFactory.AddProvider<T>(ConfigureProc: TProc<T>): TLoggerFactory;
 begin
-  var Provider: T := nil;
-
-  var ctx := TRttiContext.Create;
-  try
-    var typ := ctx.GetType(TypeInfo(T));
-    for var method in typ.GetMethods do
-    begin
-      // find zero arg constructor
-      if typ.IsInstance and method.IsConstructor and (Length(method.GetParameters) = 0) then
-      begin
-        var val := method.Invoke(typ.AsInstance.MetaclassType, []);
-        Provider := val.AsType<T>;
-        Break;
-      end;
-    end;
-
-    if Provider = nil then
-      raise EArgumentException.Create(Format('Unsupported type: %s', [typ.ToString]));
-  finally
-    ctx.Free;
-  end;
-
-  Result := AddProvider<T>(Provider, ConfigureProc);
+  Result := AddProvider<T>(T.Create, ConfigureProc);
 end;
 
 function TLoggerFactory.AddProvider<T>(Provider: T; ConfigureProc: TProc<T>): TLoggerFactory;
@@ -782,8 +867,8 @@ end;
 constructor TLoggerFactory.Create;
 begin
   FProviders := TDictionary<string, ILoggerProvider>.Create;
-  FStaticProps := TDictionary<string, variant>.Create;
-  FDynamicProps := TList<TProc<TDictionary<string, variant>>>.Create;
+  FStaticProps := TDictionary<string, Variant>.Create;
+  FDynamicProps := TList<TProc<TDictionary<string, Variant>>>.Create;
 
   FValueFormatter := DefaultValueFormatter;
   FStateFormatter := DefaultStateFormatter;
