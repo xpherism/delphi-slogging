@@ -44,9 +44,6 @@ type
     FId: Integer;
     FName: string;
   public
-    constructor Create(const Id: Integer; const Name: string); overload;
-    constructor Create(const Id: Integer); overload;
-
     class operator Implicit(Id: Integer): TEventId;
 
     property Id: Integer read FId;
@@ -243,6 +240,8 @@ type
 
   function DefaultValueFormatter(const Fmt: string; const [ref] Value: Variant): string; inline;
   function DefaultStateFormatter(const [ref] State: TLogState): string; inline;
+
+  function EventId(Id: Integer; Name: String): TEventId; inline;
 
 var
   LoggerFactory: TLoggerFactory = nil;
@@ -578,16 +577,10 @@ end;
 
 { TEventId }
 
-constructor TEventId.Create(const Id: Integer; const Name: string);
+function EventId(Id: Integer; Name: String): TEventId; inline;
 begin
-  FId := Id;
-  FName := Name;
-end;
-
-constructor TEventId.Create(const Id: Integer);
-begin
-  FId := Id;
-  FName := '';
+  Result.FId := Id;
+  Result.FName := Name;
 end;
 
 class operator TEventId.Implicit(Id: Integer): TEventId;

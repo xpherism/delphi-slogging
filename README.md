@@ -11,6 +11,10 @@ Compiled and tested using Delphi 10.4.2
 
 TODO Add test cases
 
+TODO Windows Events Logger
+
+TODO Extract provider configuration properties and features into helper classes and interfaces to keep inheritance to a minimum.
+
 ## Documentation
 
 [ILogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.pas#L126-L162)
@@ -25,6 +29,19 @@ TODO Add test cases
 
 [JsonFileLogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.File.Json.pas#L38-L53)
 
+### EventId
+
+EventId is implementet as record which can be implicit assigned from an Integer.
+
+```pascal
+var Id: TEventId := 12;
+```
+
+is possible.
+
+EventId is a concept from Windows event log, but is practical to have for structured logging, ie. Operations can monitor for specific event types and react accordingly.
+
+Use helper function `EventId(Id: Integer; Name: String)` to create a named EventId.
 ### Output formats
 
 Console output format:
