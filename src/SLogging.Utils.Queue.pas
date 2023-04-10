@@ -123,7 +123,7 @@ begin
         var LastWriteTs := Now;
         repeat
           try
-            case FEvent.WaitFor(100) of
+            case FEvent.WaitFor(FMaxQueueTime) of
               wrTimeout:
                 ;
               wrAbandoned:
@@ -139,14 +139,22 @@ begin
             if (MilliSecondsBetween(Now, LastWriteTs) >= FMaxQueueTime) or (FQueue.Count >= FMinQueueSize) or (FTask.Status = TTaskStatus.Canceled) then
               while FQueue.Count > 0 do
               begin
-                // How to best handle writer errors? how many retries to dequeue? should we throw away log messages?
-                TMonitor.Enter(FLock);
-                try
-                  if FWorker.HandleDequeue(FQueue.Peek) then
+                // A queue is FIFO ordered and we only use one worker.
+                // This means we can peek the first entry without locking
+                // and remove it only if handled by worker; which will require
+                // locking due to TQueue using array as a circular buffer
+                // for implementation and will need to update pointers and
+                // reallocate if it needs to grow.
+                var Entry := FQueue.Peek;
+
+                if FWorker.HandleDequeue(Entry) then
+                  TMonitor.Enter(FLock);
+                  try
                     FQueue.Dequeue;
-                finally
-                  TMonitor.Exit(FLock);
-                end;
+                  finally
+                    TMonitor.Exit(FLock);
+                  end;
+
                 LastWriteTs := Now;
               end;
 
