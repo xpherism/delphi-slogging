@@ -46,6 +46,7 @@ type
   private
     FQueue: TLogQueue<TLogEntry>;
     FWriter: TFileWriter;
+    FUseUTC: Boolean;
     FMinLevel: TLogLevel;
     FEncoding: TEncoding;
     FFileName: String;
@@ -63,6 +64,7 @@ type
     constructor Create; virtual;
     destructor Destroy; override;
 
+    property UseUTC: Boolean read FUseUTC write FUseUTC;
     property MinLevel: TLogLevel read FMinLevel write SetMinLevel;
     property FileName: string read FFilename write FFileName;
     property FileNameFormatter: TFunc<string, string> read FFilenameFormatter write FFilenameFormatter;
@@ -187,7 +189,10 @@ begin
   Entry.MessageTemplate := State.MessageTemplate;
   Entry.Message := Formatter(State);
   Entry.Category := State.Category;
-  Entry.Timestamp := TLogTime.UTC;
+  if FProvider.UseUTC then
+    Entry.Timestamp := TLogTime.UTC
+  else
+    Entry.Timestamp := TLogTime.Now;
   Entry.Properties := State.Properties;
   Entry.EventId := EventId;
   Entry.Level := LogLevel;
@@ -214,6 +219,7 @@ begin
     end;
   FMinLevel := TLogLevel.Information;
   FEncoding := TEncoding.UTF8;
+  FUseUTC := True;
 end;
 
 destructor TFileLoggerProviderBase.Destroy;

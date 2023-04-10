@@ -104,7 +104,7 @@ begin
     if FProvider.UseUTC then
       JB.WriteValue(TLogTime.UTC.FormatISO8601)
     else
-      JB.WriteValue(TLogTime.UTC.FormatISO8601);
+      JB.WriteValue(TLogTime.Now.FormatISO8601);
     JB.WritePropertyName('logLevel');
     JB.WriteValue(JsonLogLevelNames[LogLevel]);
 

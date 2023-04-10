@@ -174,7 +174,10 @@ begin
   Entry.MessageTemplate := State.MessageTemplate;
   Entry.Message := Formatter(State);
   Entry.Category := State.Category;
-  Entry.Timestamp := TLogTime.UTC;
+  if FProvider.UseUTC then
+    Entry.Timestamp := TLogTime.UTC
+  else
+    Entry.Timestamp := TLogTime.Now;
   Entry.Properties := State.Properties;
 
   if TJsonFileLoggerProvider(FProvider).IncludeScopes then

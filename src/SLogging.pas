@@ -18,8 +18,7 @@ uses
   System.Variants,
   System.SysUtils,
   System.Classes,
-  System.Generics.Collections,
-  SLogging.Utils;
+  System.Generics.Collections;
 
 type
   {$SCOPEDENUMS ON}
