@@ -34,6 +34,16 @@ type
     function HandleDequeue(const [ref] Entry: T): Boolean;
   end;
 
+  ELogQueueFullException = class(Exception);
+
+  {$SCOPEDENUMS ON}
+  TLogQueueFullAction = (
+    Error,   // raise exception
+    Ignore,  // ignore new entries
+    Discard  // discard old entries
+  );
+  {$SCOPEDENUMS OFF}
+
   TLogQueue<T> = class
   private
     FLock: TObject;
@@ -41,11 +51,15 @@ type
     FEvent: TEvent;
     FTask: ITask;
     FMinQueueSize: Integer;
+    FMaxQueueSize: Integer;
     FMaxQueueTime: Integer;
     FWorker: ILogQueueWorker<T>;
     FOnWorkerError: TProc<Exception>;
+    FWhenQueueFull: TLogQueueFullAction;
     procedure EnsureWorker;
     procedure HandleWorkerError(Exc: Exception); inline;
+    procedure SetMinQueueSize(Value: Integer);
+    procedure SetMaxQueueSize(Value: Integer);
   public
     constructor Create(Worker: ILogQueueWorker<T>);
     destructor Destroy; override;
@@ -53,8 +67,11 @@ type
 
     procedure Enqueue(const [ref] Entry: T);
 
-    property MinQueueSize: Integer read FMinQueueSize write FMinQueueSize;
-    property MaxQueueTime: Integer read FMaxQueueTime write FMaxQueueTime; // milliseconds
+    property MaxQueueTime: Integer read FMaxQueueTime write FMaxQueueTime; // max. queue wait time in milliseconds before flushing
+    property MinQueueSize: Integer read FMinQueueSize write SetMinQueueSize; // min. number of entries before flushing
+    property MaxQueueSize: Integer read FMaxQueueSize write SetMaxQueueSize; // max. number entries to contain (< 1 mean infinite queue length)
+    property WhenQueueFull: TLogQueueFullAction read FWhenQueueFull write FWhenQueueFull;
+
     property OnWorkerError: TProc<Exception> read FOnWorkerError write FOnWorkerError;
   end;
 
@@ -72,6 +89,8 @@ begin
 
   FWorker := Worker;
   FMinQueueSize := 8;
+  FMaxQueueSize := 1024;
+  FWhenQueueFull := TLogQueueFullAction.Discard;
   FMaxQueueTime := 1000;
   FLock := TObject.Create;
   FQueue := TQueue<T>.Create;
@@ -104,6 +123,12 @@ begin
 
   TMonitor.Enter(FLock);
   try
+    if (FMaxQueueSize > 0) and (FQueue.Count >= FMaxQueueSize) then
+      case FWhenQueueFull of
+        TLogQueueFullAction.Error: raise ELogQueueFullException.Create('Queue full');
+        TLogQueueFullAction.Ignore: Exit;
+        TLogQueueFullAction.Discard: FQueue.Dequeue;
+      end;
     FQueue.Enqueue(Entry);
   finally
     TMonitor.Exit(FLock);
@@ -180,5 +205,22 @@ begin
   if Assigned(FOnWorkerError) then
     FOnWorkerError(Exc);
 end;
+
+procedure TLogQueue<T>.SetMinQueueSize(Value: Integer);
+begin
+  if (FMaxQueueSize >= 0) and (Value >= FMaxQueueSize) then
+    raise EArgumentOutOfRangeException.Create('MinQueueSize must be smaller than MaxQueueSize');
+
+  FMinQueueSize := Value;
+end;
+
+procedure TLogQueue<T>.SetMaxQueueSize(Value: Integer);
+begin
+  if (Value < FMinQueueSize) then
+    raise EArgumentOutOfRangeException.Create('MinQueueSize must be smaller than MaxQueueSize');
+
+  FMaxQueueSize := Value;
+end;
+
 
 end.
