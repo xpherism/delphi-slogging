@@ -14,22 +14,6 @@ uses
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
 type
-  // this record is used for a final snapshot of an entire log entry
-  TLogEntry = record
-    Timestamp: TLogTime;
-    EventId: TEventId;
-    Level: TLogLevel;
-    MessageTemplate: string;
-    &Message: string;
-    Category: string;
-    Properties: TArray<TPair<string, variant>>;
-    Scopes: TArray<TLogState>;
-    &Exception: record
-      &Message: string;
-      StackTrace: string;
-    end;
-  end;
-
   ILogQueueWorker<T> = interface
     function HandleDequeue(const [ref] Entry: T): Boolean;
   end;
@@ -173,12 +157,14 @@ begin
                 var Entry := FQueue.Peek;
 
                 if FWorker.HandleDequeue(Entry) then
+                begin
                   TMonitor.Enter(FLock);
                   try
                     FQueue.Dequeue;
                   finally
                     TMonitor.Exit(FLock);
                   end;
+                end;
 
                 LastWriteTs := Now;
               end;

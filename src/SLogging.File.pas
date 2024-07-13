@@ -31,25 +31,25 @@ type
   end;
 
   TFileLogger = class(TInterfacedObject, ILoggerImplementor)
-  private
+  protected
+    FCategory: String;
     FProvider: TFileLoggerProvider;
   public
-    constructor Create(Provider: TFileLoggerProvider);
+    constructor Create;
 
     function IsEnabled(const LogLevel: TLogLevel): boolean; inline;
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>);
-    procedure BeginScope(const State: TLogState);
+    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter); virtual;
+    procedure BeginScope(const State: TState);
     procedure EndScope;
   end;
 
-  TFileLoggerProviderBase = class abstract (TInterfacedObject, ILogQueueWorker<TLogEntry>)
+  TFileLoggerProvider = class (TInterfacedObject, ILogQueueWorker<TLogEntry>, ILoggerProvider)
   private
-    FQueue: TLogQueue<TLogEntry>;
-    FWriter: TFileWriter;
     FUseUTC: Boolean;
     FMinLevel: TLogLevel;
     FEncoding: TEncoding;
     FFileName: String;
+    FIncludeScopes: Boolean;
     FFilenameFormatter: TFunc<string, string>;
     procedure SetMinLevel(const Value: TLogLevel);
     function GetMaxQueueTime: Integer;
@@ -57,15 +57,22 @@ type
     procedure SetMaxQueueTime(const Value: Integer);
     procedure SetMinQueueSize(const Value: Integer);
   protected
-    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; virtual; abstract;
+    FQueue: TLogQueue<TLogEntry>;
+    FWriter: TFileWriter;
+    FScopes: IScopeHandler<TState>;
+    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; virtual;
     property Queue: TLogQueue<TLogEntry> read FQueue;
     property Writer: TFileWriter read FWriter;
   public
     constructor Create; virtual;
     destructor Destroy; override;
 
+    function CreateLogger(Category: string): ILoggerImplementor; virtual;
+    procedure Close;
+
     property UseUTC: Boolean read FUseUTC write FUseUTC;
     property MinLevel: TLogLevel read FMinLevel write SetMinLevel;
+    property IncludeScopes: Boolean read FIncludeScopes write FIncludeScopes;
     property FileName: string read FFilename write FFileName;
     property FileNameFormatter: TFunc<string, string> read FFilenameFormatter write FFilenameFormatter;
     property Encoding: TEncoding read FEncoding write FEncoding;
@@ -73,19 +80,6 @@ type
     property MaxQueueTime: Integer read GetMaxQueueTime write SetMaxQueueTime;
     // <summary>flush queue if the number of entries X or more</summary>
     property MinQueueSize: Integer read GetMinQueueSize write SetMinQueueSize;
-  end;
-
-  TFileLoggerProvider = class(TFileLoggerProviderBase, ILoggerProvider)
-  private
-    FLogger: ILoggerImplementor;
-  protected
-    function HandleDequeue(const [ref] Entry: TLogEntry): Boolean; override;
-  public
-    constructor Create; override;
-    destructor Destroy; override;
-
-    function CreateLogger(Category: string): ILoggerImplementor;
-    procedure Close;
   end;
 
 implementation
@@ -159,12 +153,11 @@ begin
   end;
 end;
 
-
 { TFileLogger }
 
-constructor TFileLogger.Create(Provider: TFileLoggerProvider);
+constructor TFileLogger.Create;
 begin
-  FProvider := Provider;
+  inherited;
 end;
 
 function TFileLogger.IsEnabled(const LogLevel: TLogLevel): boolean;
@@ -172,30 +165,67 @@ begin
   Result := LogLevel >= FProvider.MinLevel;
 end;
 
-procedure TFileLogger.BeginScope(const State: TLogState);
+procedure TFileLogger.BeginScope(const State: TState);
 begin
+  FProvider.FScopes.BeginScope(State);
 end;
 
 procedure TFileLogger.EndScope;
 begin
+  FProvider.FScopes.EndScope;
 end;
 
-procedure TFileLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>);
+procedure TFileLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
 begin
   if not IsEnabled(LogLevel) then
     Exit;
 
   var Entry: TLogEntry;
-  Entry.MessageTemplate := State.MessageTemplate;
-  Entry.Message := Formatter(State);
-  Entry.Category := State.Category;
+  Entry.MessageTemplate := State.Template;
+  Entry.Message := Formatter(State, Exc);
+  Entry.Category := FCategory;
   if FProvider.UseUTC then
-    Entry.Timestamp := TLogTime.UTC
+    Entry.TimeStamp := TLogTime.UTC
   else
-    Entry.Timestamp := TLogTime.Now;
-  Entry.Properties := State.Properties;
+    Entry.TimeStamp := TLogTime.Now;
   Entry.EventId := EventId;
-  Entry.Level := LogLevel;
+  Entry.LogLevel := LogLevel;
+  SetLength(Entry.Renderings, Length(state.Values));
+
+  var Props := TDictionary<string, variant>.Create(Length(state.Values));
+  try
+    // Get static and dynamic properties
+    LoggerFactory.EvalProperties(
+      procedure(Name: String; Value: Variant)
+      begin
+        Props.AddOrSetValue(Name, Value);
+      end
+    );
+
+    // Get scope properties
+    if FProvider.IncludeScopes then
+      FProvider.FScopes.ForEach(
+        procedure(const [ref] State: TState)
+        begin
+          for var item in State.Values do
+          begin
+            Props.AddOrSetValue(item.Name, item.Value);
+          end;
+        end
+      );
+
+    // Get message template properties (values and renderings)
+    for var I := 0 to Length(state.Values)-1 do
+    begin
+      Entry.Renderings[I] := state.Values[I].FormattedValue;
+      Props.AddOrSetValue(state.Values[I].Name, state.Values[I].Value);
+    end;
+
+    Entry.Properties := Props.ToArray;
+  finally
+    Props.Free;
+  end;
+
   if Exc <> nil then
   begin
     Entry.Exception.Message := Exc.ToString;
@@ -205,11 +235,18 @@ begin
   FProvider.FQueue.Enqueue(Entry);
 end;
 
-{ TFileLoggerProviderBase }
+{ TFileLoggerProvider }
 
-constructor TFileLoggerProviderBase.Create;
+procedure TFileLoggerProvider.Close;
+begin
+  FQueue.Close;
+end;
+
+constructor TFileLoggerProvider.Create;
 begin
   inherited;
+  FIncludeScopes := False;
+  FScopes := TScopeHandler<TState>.Create;
   FWriter := TFileWriter.Create;
   FQueue := TLogQueue<TLogEntry>.Create(Self);
   FQueue.OnWorkerError :=
@@ -222,60 +259,46 @@ begin
   FUseUTC := True;
 end;
 
-destructor TFileLoggerProviderBase.Destroy;
+destructor TFileLoggerProvider.Destroy;
 begin
   FreeAndNil(FQueue);
   FreeAndNil(FWriter);
+  FScopes := nil;
+
   inherited;
 end;
 
-function TFileLoggerProviderBase.GetMaxQueueTime: Integer;
+function TFileLoggerProvider.GetMaxQueueTime: Integer;
 begin
   Result := FQueue.MaxQueueTime;
 end;
 
-function TFileLoggerProviderBase.GetMinQueueSize: Integer;
+function TFileLoggerProvider.GetMinQueueSize: Integer;
 begin
   Result := FQueue.MinQueueSize;
 end;
 
-procedure TFileLoggerProviderBase.SetMaxQueueTime(const Value: Integer);
+procedure TFileLoggerProvider.SetMaxQueueTime(const Value: Integer);
 begin
   FQueue.MaxQueueTime := Value;
 end;
 
-procedure TFileLoggerProviderBase.SetMinLevel(const Value: TLogLevel);
+procedure TFileLoggerProvider.SetMinLevel(const Value: TLogLevel);
 begin
   FMinLevel := Value;
 end;
 
-procedure TFileLoggerProviderBase.SetMinQueueSize(const Value: Integer);
+procedure TFileLoggerProvider.SetMinQueueSize(const Value: Integer);
 begin
   FQueue.MinQueueSize := Value;
 end;
 
-{ TFileLoggerProvider }
-
-procedure TFileLoggerProvider.Close;
-begin
-  Queue.Close;
-end;
-
-constructor TFileLoggerProvider.Create;
-begin
-  inherited;
-  FLogger := TFileLogger.Create(Self);
-end;
-
 function TFileLoggerProvider.CreateLogger(Category: string): ILoggerImplementor;
 begin
-  Result := FLogger;
-end;
-
-destructor TFileLoggerProvider.Destroy;
-begin
-  FLogger := nil;
-  inherited;
+  var Logger := TFileLogger.Create;
+  Logger.FCategory := Category;
+  Logger.FProvider := Self;
+  Result := Logger;
 end;
 
 function TFileLoggerProvider.HandleDequeue(const [ref] Entry: TLogEntry): Boolean;
@@ -284,7 +307,7 @@ begin
   try
     SB.Append(entry.Timestamp.FormatISO8601);
     SB.Append(' ');
-    SB.Append(LogLevelNames[entry.Level]);
+    SB.Append(LogLevelNames[entry.LogLevel]);
     SB.Append(' ');
     SB.Append(entry.Category);
     SB.Append('[');

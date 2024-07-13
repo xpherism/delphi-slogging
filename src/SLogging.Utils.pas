@@ -5,8 +5,7 @@ interface
 uses
   System.Classes,
   System.Variants,
-  System.SysUtils,
-  SLogging;
+  System.SysUtils;
 
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
@@ -25,6 +24,28 @@ type
     procedure WriteLn(const txt: string); inline;
   end;
 
+  // Would be nice if generic support better constraint support
+  // String span
+  TStringSpan = record
+  private type
+    T = string;
+    P = ^T;
+    E = char;
+  private
+    FData: P;
+    FStart: Integer;
+    FLength: Integer;
+    constructor Create(const [ref] Data: T; Start: Integer; Length: Integer);
+    function GetValue(Index: Integer): E; inline;
+  public
+    class operator Implicit(const [ref] S: TStringSpan): T;
+
+    property Length: Integer read FLength;
+    property Values[Index: Integer]: E read GetValue; default;
+  end;
+
+  function StringSpan(const [ref] Data: TStringSpan.T; Start: Integer; Length: Integer): TStringSpan; inline;
+
 implementation
 
 uses
@@ -32,6 +53,31 @@ uses
   Winapi.Windows,
 {$ENDIF}
   System.DateUtils;
+
+
+{ TReadOnlySpan<T> }
+
+function StringSpan(const [ref] Data: TStringSpan.T; Start: Integer; Length: Integer): TStringSpan;
+begin
+  Result := TStringSpan.Create(Data, Start, Length);
+end;
+
+constructor TStringSpan.Create(const [ref] Data: T; Start, Length: Integer);
+begin
+  FData := P(Data);
+  FStart := Start;
+  FLength := Length;
+end;
+
+function TStringSpan.GetValue(Index: Integer): E;
+begin
+  Result := String(FData)[FStart+Index-1];
+end;
+
+class operator TStringSpan.Implicit(const [ref] S: TStringSpan): T;
+begin
+  Result := Copy(T(S.FData), S.FStart, S.FLength);
+end;
 
 { TStdOut }
 
@@ -61,6 +107,7 @@ end;
 procedure TStdOut.Write(const txt: String);
 begin
   Write(Output, txt);
+  Flush(Output);
 end;
 {$ENDIF}
 
@@ -92,6 +139,7 @@ end;
 procedure TStdErr.Write(const txt: String);
 begin
   Write(ErrOutput, txt);
+  Flush(ErrOutput);
 end;
 {$ENDIF}
 

@@ -7,7 +7,8 @@ uses
   System.JSON.Writers,
   System.Generics.Collections,
   System.Variants,
-  SLogging;
+  SLogging,
+  SLogging.Utils;
 
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
@@ -18,10 +19,18 @@ type
   TJsonWriterHelper = class helper for TJsonWriter
   public
     procedure WriteEventId(const [ref] EventId: TEventId);
+    procedure WriteVariant(const [ref] Value: Variant);
     procedure WriteProperties(const [ref] Value: TArray<TPair<string, variant>>);
-    procedure WriteScope(const [ref] Value: TLogState);
-    procedure WriteScopes(const [ref] Value: TArray<TLogState>);
+    procedure WriteScope(const [ref] Value: TState);
+    procedure WriteScopes(const [ref] Value: TArray<TState>);
   end;
+
+  TStdOutHelper = record helper for TStdout
+  public
+    procedure WriteJson(const [ref] Values: TArray<TPair<string, Variant>>);
+//    procedure WriteJsonLn<T>(const MessageTemplate: string; const Args: array of T; const ValueFormatter: TMessageTemplateValueFormatter<T>);
+  end;
+
 
 implementation
 
@@ -44,59 +53,89 @@ begin
   for var item in Value do
   begin
     WritePropertyName(item.Key);
-
-    //varArray: TODO
-    //VarIsArray()
-
-    case VarType(item.Value) of
-      varEmpty: WriteUndefined;
-      varNull: WriteNull;
-      varSmallInt: WriteValue(TVarData(item.Value).VSmallInt);
-      varInteger: WriteValue(TVarData(item.Value).VInteger);
-      varSingle: WriteValue(TVarData(item.Value).VSingle);
-      varDouble: WriteValue(TVarData(item.Value).VDouble);
-      varCurrency: WriteValue(TVarData(item.Value).VCurrency);
-      varDate: WriteValue(TVarData(item.Value).VDate);
-      varOleStr: WriteValue(String(TVarData(item.Value).VOleStr));
-      varBoolean: WriteValue(TVarData(item.Value).VBoolean);
-      varShortInt: WriteValue(TVarData(item.Value).VShortInt);
-      varByte: WriteValue(TVarData(item.Value).VByte);
-      varWord: WriteValue(TVarData(item.Value).VWord);
-      varUInt32: WriteValue(TVarData(item.Value).VUInt32);
-      varInt64: WriteValue(TVarData(item.Value).VInt64);
-      varUInt64: WriteValue(TVarData(item.Value).VUInt64);
-      varString:  WriteValue(String(RawByteString(TVarData(item.Value).VString)));
-      varUString: WriteValue(UnicodeString(TVarData(item.Value).VUString));
-//      varObject: not supported, but we should probably support TArray<TPair<string, variant>> as "object"
-      else
-        WriteUndefined;
-    end;
+    WriteVariant(item.Value);
   end;
   WriteEndObject;
 end;
 
-procedure TJsonWriterHelper.WriteScope(const [ref] Value: TLogState);
+procedure TJsonWriterHelper.WriteScope(const [ref] Value: TState);
 begin
   WriteStartObject;
 
-  WritePropertyName('Message');
-  WriteValue(Value.Message);
+  if Value.Template <> '' then
+  begin
+    WritePropertyName('MessageTemplate');
+    WriteValue(Value.Template);
+  end;
 
-  WritePropertyName('Category');
-  WriteValue(Value.Category);
+  if Value.Message <> '' then
+  begin
+    WritePropertyName('Message');
+    WriteValue(Value.Message);
+  end;
 
   WritePropertyName('Properties');
-  WriteProperties(Value.Properties);
+  WriteStartObject;
+  for var item in Value.Values do
+  begin
+    WritePropertyName(item.Name);
+    WriteVariant(item.Value);
+  end;
+  WriteEndObject;
 
   WriteEndObject;
 end;
 
-procedure TJsonWriterHelper.WriteScopes(const [ref] Value: TArray<TLogState>);
+procedure TJsonWriterHelper.WriteScopes(const [ref] Value: TArray<TState>);
 begin
   WriteStartArray;
   for var scope in Value do
     WriteScope(scope);
   WriteEndArray;
+end;
+
+procedure TJsonWriterHelper.WriteVariant(const [ref] Value: Variant);
+begin
+  case VarType(Value) of
+    varEmpty: WriteUndefined;
+    varNull: WriteNull;
+    varSmallInt: WriteValue(TVarData(Value).VSmallInt);
+    varInteger: WriteValue(TVarData(Value).VInteger);
+    varSingle: WriteValue(TVarData(Value).VSingle);
+    varDouble: WriteValue(TVarData(Value).VDouble);
+    varCurrency: WriteValue(TVarData(Value).VCurrency);
+    varDate: WriteValue(TVarData(Value).VDate);
+    varOleStr: WriteValue(String(TVarData(Value).VOleStr));
+    varBoolean: WriteValue(TVarData(Value).VBoolean);
+    varShortInt: WriteValue(TVarData(Value).VShortInt);
+    varByte: WriteValue(TVarData(Value).VByte);
+    varWord: WriteValue(TVarData(Value).VWord);
+    varUInt32: WriteValue(TVarData(Value).VUInt32);
+    varInt64: WriteValue(TVarData(Value).VInt64);
+    varUInt64: WriteValue(TVarData(Value).VUInt64);
+    varString:  WriteValue(String(RawByteString(TVarData(Value).VString)));
+    varUString: WriteValue(UnicodeString(TVarData(Value).VUString));
+//      varObject: not supported, but we should probably support TArray<TPair<string, variant>> as "object"
+    else
+      WriteUndefined;
+  end;
+end;
+
+{ TStdOutHelper }
+
+procedure TStdOutHelper.WriteJson(const [ref] Values: TArray<TPair<string, Variant>>);
+begin
+  var SR := TStringStream.Create;
+  var JB := TJsonTextWriter.Create(TStreamWriter.Create(SR), True);
+  try
+    JB.WriteProperties(Values);
+    JB.Flush;
+
+    WriteLn(SR.DataString);
+  finally
+    JB.Free;
+    SR.Free;
+  end;
 end;
 
 end.

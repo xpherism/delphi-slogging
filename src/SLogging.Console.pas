@@ -18,21 +18,23 @@ type
   {* Console Logger *}
 
   TConsoleLogger = class(TInterfacedObject, ILoggerImplementor)
-  private
+  protected
     FProvider: TConsoleLoggerProvider;
+    FCategory: String;
   public
-    constructor Create(Provider: TConsoleLoggerProvider);
-
     function IsEnabled(const LogLevel: TLogLevel): boolean; inline;
-    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>); virtual;
-    procedure BeginScope(const State: TLogState); virtual;
-    procedure EndScope; virtual;
+    procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter); virtual;
+    procedure BeginScope(const State: TState);
+    procedure EndScope;
   end;
 
   TConsoleLoggerProvider = class(TInterfacedObject, ILoggerProvider)
   private
     FMinLevel: TLogLevel;
-    FLogger: ILoggerImplementor;
+    FUseUtc: Boolean;
+    FIncludeScopes: Boolean;
+  protected
+    FScopes: IScopeHandler<TState>;
     FStdOut: TStdOut;
   public
     constructor Create;
@@ -43,6 +45,8 @@ type
 
     property MinLevel: TLogLevel read FMinLevel write FMinLevel;
     property Encoding: TEncoding read FStdOut.Encoding write FStdOut.Encoding;
+    property UseUTC: Boolean read FUseUTC write FUseUTC;
+    property IncludeScopes: Boolean read FIncludeScopes write FIncludeScopes;
   end;
 
 implementation
@@ -57,25 +61,22 @@ const
 
 { TConsoleLogger }
 
-constructor TConsoleLogger.Create(Provider: TConsoleLoggerProvider);
-begin
-  FProvider := Provider;
-end;
-
 function TConsoleLogger.IsEnabled(const LogLevel: TLogLevel): boolean;
 begin
   Result := LogLevel >= FProvider.MinLevel;
 end;
 
-procedure TConsoleLogger.BeginScope(const State: TLogState);
+procedure TConsoleLogger.BeginScope(const State: TState);
 begin
+  FProvider.FScopes.BeginScope(State);
 end;
 
 procedure TConsoleLogger.EndScope;
 begin
+  FProvider.FScopes.EndScope;
 end;
 
-procedure TConsoleLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const State: TLogState; Formatter: TStateFormatter<TLogState>);
+procedure TConsoleLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
 begin
   if not IsEnabled(LogLevel) then
     Exit;
@@ -84,22 +85,20 @@ begin
   try
     SB.Append(LogLevelNames[LogLevel]);
     SB.Append(' ');
-    SB.Append(State.Category);
+    SB.Append(FCategory);
     SB.Append('[');
     SB.Append(EventId.Id);
     SB.Append(']');
     SB.Append(sLineBreak);
     SB.Append('     ');
-
-    if Assigned(Formatter) then
-      SB.Append(Formatter(State))
-    else
-      SB.Append('[null]');
+    SB.Append(Formatter(State, Exc));
 
     if Exc <> nil then
     begin
       SB.Append(sLineBreak+sLineBreak);
-      SB.Append(exc.StackTrace);
+      SB.Append(Exc.Message);
+      SB.Append(sLineBreak);
+      SB.Append(Exc.StackTrace);
       SB.Append(sLineBreak);
     end;
 
@@ -113,24 +112,29 @@ end;
 
 procedure TConsoleLoggerProvider.Close;
 begin
-
+  inherited;
 end;
 
 constructor TConsoleLoggerProvider.Create;
 begin
-  FLogger := TConsoleLogger.Create(Self);
   FMinLevel := TLogLevel.Information;
   FStdOut.Encoding := TEncoding.Default;
+  FScopes := TScopeHandler<TState>.Create;
+  FIncludeScopes := False;
+  FUseUtc := True;
 end;
 
 function TConsoleLoggerProvider.CreateLogger(Category: string): ILoggerImplementor;
 begin
-  Result := FLogger;
+  var Logger := TConsoleLogger.Create;
+  Logger.FProvider := Self;
+  Logger.FCategory := Category;
+  Result := Logger;
 end;
 
 destructor TConsoleLoggerProvider.Destroy;
 begin
-  FLogger := nil;
+  FScopes := nil;
   inherited;
 end;
 
