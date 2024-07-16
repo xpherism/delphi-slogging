@@ -85,11 +85,8 @@ end;
 
 destructor TLogQueue<T>.Destroy;
 begin
-  FTask.Cancel;
-  while FTask <> nil do
-    CheckSynchronize(1000);
+  Close;
 
-  FQueue.Clear;
   FreeAndNil(FEvent);
   FreeAndNil(FQueue);
   FreeAndNil(FLock);
@@ -97,8 +94,16 @@ end;
 
 procedure TLogQueue<T>.Close;
 begin
-  if FTask <> nil then
-    FTask.Cancel;
+  if FTask = nil then
+    Exit;
+
+  while FQueue.Count > 0 do
+    CheckSynchronize(100);
+
+  FTask.Cancel;
+
+  while FTask <> nil do
+    CheckSynchronize(100);
 end;
 
 procedure TLogQueue<T>.Enqueue(const [ref] Entry: T);

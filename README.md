@@ -9,40 +9,88 @@ Features include
 
 Compiled and tested using Delphi 10.4.2
 
-TODO Add test cases
+Planned
+ - Add test cases
+ - Windows Events Log LoggerProvider
+ - Freepascal support
 
-TODO Windows Events Logger
+## About message template arguments
 
-TODO Extract provider configuration properties and features into helper classes and interfaces to keep inheritance to a minimum.
+In the currently implementation variants are used, as they are the only on that preserve type information for `TDateTime`.
+Both open arrays and array of `TValue` (RTTI any value holder) loses `TDateTime` type information and are degraded to a `double`. We need `TDateTime` type information to be able properly format datetime value automatically.
+using `class operator Implicit` we could handle implicit conversions.
+
+For more information see https://learn.microsoft.com/en-us/dotnet/core/extensions/logging?tabs=command-line#log-message-template
 
 ## Documentation
 
-[ILogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.pas#L126-L162)
+`Variants` are used for parameter passing, as they preserve type information for TDateTime, which TValue does not (it handles them as a double, and we lose type information).
 
-[LoggerFactory](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.pas#L213-L243)
+When creating a new logger
+```pascal
+LoggerFactory.CreateLogger<TBackendService>
+LoggerFactory.CreateLogger('MyCategory')
+```
+an `ILogger` instance is returned.
 
-[ConsoleLogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.pas#L213-L243)
+Loggers for each provider and category are cached and reused. Scopes are provider global and thus exists across different logger category instanses for a given provider.
 
-[JsonConsoleLogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.Console.Json.pas#L34-L53)
+```pascal
+  ILogger = interface
+    function IsEnabled(const LogLevel: TLogLevel): boolean;
 
-[FileLogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.File.pas#L45-L87)
+    procedure BeginScope(const Properties: TArray<TPair<string, variant>>);
+    procedure EndScope;
 
-[JsonFileLogger](https://github.com/xpherism/delphi-slogging/blob/677e8c77e2bf7556281baf3685c10b09bb296ede/src/SLogging.File.Json.pas#L38-L53)
+    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogTrace(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+
+    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogDebug(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+
+    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogInformation(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+
+    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogWarning(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+
+    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogError(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+
+    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogCritical(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+  end;
+```
 
 ### EventId
 
-EventId is implementet as record which can be implicit assigned from an Integer.
+EventId is implemented as record which can be implicit assigned from an Integer.
 
 ```pascal
 var Id: TEventId := 12;
 ```
 
-is possible.
-
-EventId is a concept from Windows event log, but is practical to have for structured logging, ie. Operations can monitor for specific event types and react accordingly.
+EventId is a concept from Windows event log, and will used when eventlog support is implemented.
 
 Use helper function `EventId(Id: Integer; Name: String)` to create a named EventId.
+
 ### Output formats
+
+Current plain text and clef (json) format is supported for both console and file output
+
+#### plain text
 
 Console output format:
 ```
@@ -55,38 +103,9 @@ file output format:
 2023-04-10T05:41:51.942867700Z INFO  TBackendUserController[0] Backend started
 ```
 
-JSON output format: (All JSON log entries single line (ie. JSON-L). Shown formatted below for readability.
-```json
-{
-    "timestamp": "2023-04-10T05:59:58.771026200Z",
-    "logLevel": "error",
-    "category": "System.TObject",
-    "eventId": {
-        "id": 1,
-        "name": ""
-    },
-    "exception": {
-        "message": "Access violation at address 005F2452 in module 'sloggingdev.exe'. Read of address 0000000C",
-        "stackTrace": "005f2452 sloggingdev.exe sloggingdev 119 initialization\r\n005f255e sloggingdev.exe sloggingdev 125 initialization\r\n005f25af sloggingdev.exe sloggingdev 132 initialization\r\n005f25ce sloggingdev.exe sloggingdev 132 initialization\r\n005f25ed sloggingdev.exe sloggingdev 132 initialization\r\n005f260c sloggingdev.exe sloggingdev 132 initialization\r\n005f272a sloggingdev.exe sloggingdev 136 initialization\r\n756000f7 KERNEL32.DLL                    BaseThreadInitThunk"
-    },
-    "message": "Something went wrong: Access violation at address 005F2452 in module 'sloggingdev.exe'. Read of address 0000000C",
-    "messageTemplate": "Something went wrong: Access violation at address 005F2452 in module 'sloggingdev.exe'. Read of address 0000000C",
-    "properties": {
-        "processId": 0,
-        "currentUserId": 222
-    },
-    "scopes": [
-        {
-            "MessageTemplate": "Processing item #{Item}",
-            "Message": "Processing item #12",
-            "Category": "System.TObject",
-            "Properties": {
-                "Item": 12
-            }
-        }
-    ]
-}
-```
+#### CLEF (json)
+
+See https://clef-json.org/ for more details.
 
 ## Example
 
@@ -101,13 +120,13 @@ LoggerFactory
         Provider.MinLevel := TLogLevel.Information;
     end
 )
-.AddProvider<TJsonFileLoggerProvider>(
+.AddProvider<TClefFileLoggerProvider>(
     procedure (Provider: TJsonFileLoggerProvider) begin
     Provider.MinLevel := TLogLevel.Trace;
     Provider.MaxQueueTime := 1000; // milliseconds
     Provider.MinQueueSize := 8;
     Provider.IncludeScopes := True;
-    Provider.FileName := 'yyyymmdd".log"';
+    Provider.FileName := 'yyyymmdd".clef"';
     Provider.FileNameFormatter :=
         function(FileName: string): string
         begin
@@ -126,7 +145,7 @@ LoggerFactory
 var logger := LoggerFactory.CreateLogger<TBackendUserController>;
 logger.LogInformation('Backend started', []);
 ...
-logger.BeginScope('Processing user {User} request', [UserName]);
+logger.BeginScope([P('UserName', UserName)]);
 try
     logger.LogTrace('checking authorization...', []);
     try
@@ -147,7 +166,7 @@ logger.LogInformation('Backend stopped', []);
 
 All logging is handled synchronously, and any ILoggerImplementor implementation must handle any async queing or buffering manuelly, see TFileLogger for an example.
 
-Note that the `FileNameFormatter` callback use used for each log entry and will impact performance (ie. don't database or any other heave calculation or lookups). The same is true for dynamic properties 
+Note that the `FileNameFormatter` callback use used for each log entry and will impact performance (ie. don't do database or any other heave calculation or io heavy lookups. Mostly used for rolling file names). The same is true for dynamic properties.
 
 ```pascal
 WithProperty(Proc: TProc<TDictionary<string, variant>>)

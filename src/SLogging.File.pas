@@ -25,9 +25,10 @@ type
   protected
     FActiveFileName: String;
     FFile: TFileStream;
-    procedure EnsureFile(const FileName: string; Formatter: TFunc<string, string>); inline;
+    procedure EnsureFile(const FileName: string; Formatter: TFunc<string, string>);
   public
     procedure WriteLine(const Line: String; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
+    destructor Destroy; override;
   end;
 
   TFileLogger = class(TInterfacedObject, ILoggerImplementor)
@@ -97,6 +98,12 @@ const
 
 { TFileWriter }
 
+destructor TFileWriter.Destroy;
+begin
+  FreeAndNil(FFile);
+  inherited;
+end;
+
 procedure TFileWriter.EnsureFile(const FileName: string; Formatter: TFunc<string, string>);
 var
   NewFileName: String;
@@ -113,6 +120,8 @@ begin
 
   if FFile = nil then
   begin
+    ForceDirectories(ExtractFilePath(NewFileName));
+
 {$IFDEF MSWINDOWS}
     Handle := CreateFile(
       PChar(NewFileName),
@@ -190,7 +199,6 @@ begin
     Entry.TimeStamp := TLogTime.Now;
   Entry.EventId := EventId;
   Entry.LogLevel := LogLevel;
-  SetLength(Entry.Renderings, Length(state.Values));
 
   var Props := TDictionary<string, variant>.Create(Length(state.Values));
   try
@@ -214,12 +222,19 @@ begin
         end
       );
 
+    var r := 0;
+    SetLength(Entry.Renderings, Length(state.Values));
     // Get message template properties (values and renderings)
     for var I := 0 to Length(state.Values)-1 do
     begin
-      Entry.Renderings[I] := state.Values[I].FormattedValue;
+      if state.Values[I].Fmt <> '' then
+      begin
+        Entry.Renderings[r] := state.Values[I].FmtValue;
+        Inc(r);
+      end;
       Props.AddOrSetValue(state.Values[I].Name, state.Values[I].Value);
     end;
+    SetLength(Entry.Renderings, r);
 
     Entry.Properties := Props.ToArray;
   finally

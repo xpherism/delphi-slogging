@@ -10,7 +10,8 @@ unit SLogging;
   make a copy (ie. assign to stack local variable or allocate on heap).
 *}
 
-{$B-} // Enable boolean short-circuit code generation by the compiler
+{$BOOLEVAL OFF}    // Enable boolean short-circuit code generation by the compiler (otherwise complete boolean expression are always evaluated which we don't want)
+{$RANGECHECKS OFF} // Disable runtimer range check
 
 interface
 
@@ -57,7 +58,8 @@ type
   TFormattedValue<T> = record
     Name: string;
     Value: T;
-    FormattedValue: string;
+    Fmt: string;
+    FmtValue: string;
   end;
 
   // When using structured logging the same message template is used multiple times
@@ -77,7 +79,7 @@ type
     FTemplate: string;
     procedure Parse;
   public
-    constructor Create(const Format: string);
+    constructor Create(const Template: string);
     destructor Destroy; override;
     function Format<T>(const Args: TArray<T>; const ValueFormatter: TValueFormatter<T>; var Values: TArray<TFormattedValue<T>>): String;
     property Template: string read FTemplate;
@@ -284,14 +286,11 @@ type
     function WithProperty(const Name: string; const Value: Variant): TLoggerFactory; overload;
     // dynamic properties called on every log event, thread id,
     function WithProperty(const Name: string; const Func: TFunc<Variant>): TLoggerFactory; overload;
-
     procedure EvalProperties(const Proc: TProc<String, Variant>);
-    
-    property ValueFormatter: TValueFormatter<Variant> read FValueFormatter write FValueFormatter;
-    property StateFormatter: TStateFormatter read FStateFormatter write FStateFormatter;
 
     procedure HandleInternalException(const Exc: Exception); inline;
-
+    property ValueFormatter: TValueFormatter<Variant> read FValueFormatter write FValueFormatter;
+    property StateFormatter: TStateFormatter read FStateFormatter write FStateFormatter;
     property OnException: TProc<Exception> read FOnException write FOnException;
   end;
   
@@ -432,12 +431,12 @@ end;
 
 { TMessageTemplate }
 
-constructor TMessageTemplate.Create(const Format: string);
+constructor TMessageTemplate.Create(const Template: string);
 begin
   SetLength(FSpans, 8);
 
   FCount := 0;
-  FTemplate := Format;
+  FTemplate := Template;
   try
     Parse;
   except
@@ -494,7 +493,16 @@ begin
 
           Values[ArgNum].Name := Name;
           Values[ArgNum].Value := Value;
-          Values[ArgNum].FormattedValue := FormattedValue;
+          if ValueFmt <> '' then
+          begin
+            Values[ArgNum].Fmt := ValueFmt;
+            Values[ArgNum].FmtValue := FormattedValue
+          end
+          else
+          begin
+            Values[ArgNum].Fmt := '';
+            Values[ArgNum].FmtValue := '';
+          end;
 
           B.Append(FormattedValue);
 
@@ -677,7 +685,7 @@ constructor TLogger.Create(const Category: string);
 begin
   FLoggers := TList<ILoggerImplementor>.Create;
   FCategory := Category;
-  
+
   for var Provider in LoggerFactory.FProviders.Values do
     FLoggers.Add(Provider.CreateLogger(FCategory));
 end;
@@ -935,13 +943,12 @@ end;
 
 destructor TLoggerFactory.Destroy;
 begin
-  FStaticProps.Clear;
-  FDynamicProps.Clear;
-
   for var Provider in FProviders.Values do
     Provider.Close;
 
   FProviders.Clear;
+  FStaticProps.Clear;
+  FDynamicProps.Clear;
   FreeAndNil(FStaticProps);
   FreeAndNil(FDynamicProps);
   FreeAndNil(FProviders);
@@ -973,32 +980,24 @@ constructor TState.Create(const Format: String; const Values: TArray<Variant>);
 begin
   TMonitor.Enter(TState.Lock);
   try
-    TState.Formatters.TryGetValue(Format, FFormatter);
+    try
+      if not TState.Formatters.TryGetValue(Format, FFormatter) then
+      begin
+        FFormatter := TMessageTemplate.Create(Format);
+        TState.Formatters.Add(Format, FFormatter);
+      end;
+    except on E: Exception do
+      begin
+        FreeAndNil(FFormatter);
+        LoggerFactory.HandleInternalException(E);
+      end;
+    end;
   finally
     TMonitor.Exit(TState.Lock);
   end;
-  
-  if FFormatter <> nil then
-    Exit;
-      
-  try
-    FFormatter := TMessageTemplate.Create(Format);
-  except on E: Exception do
-    begin
-      FreeAndNil(FFormatter);
-      LoggerFactory.HandleInternalException(E);
-    end;
-  end;
-    
+
   if FFormatter = nil then
     Exit;
-  
-  TMonitor.Enter(TState.Lock);
-  try
-    TState.Formatters.Add(Format, FFormatter);
-  finally
-    TMonitor.Exit(TState.Lock);
-  end;  
 
   FTemplate := Format;
   FMessage := FFormatter.Format<Variant>(Values, LoggerFactory.ValueFormatter, FValues);
@@ -1071,7 +1070,6 @@ begin
     FScopes.UnlockList;
   end;
 end;
-
 
 initialization
   TState.Lock := TObject.Create;

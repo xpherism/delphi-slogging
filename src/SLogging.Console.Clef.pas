@@ -82,7 +82,7 @@ begin
       JB.WritePropertyName('@r');
       JB.WriteStartArray;
       for var val in State.Values do
-        JB.WriteValue(val.FormattedValue);
+        JB.WriteValue(val.FmtValue);
       JB.WriteEndArray;
     end;
 
