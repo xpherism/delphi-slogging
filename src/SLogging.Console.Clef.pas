@@ -15,9 +15,6 @@ uses
 
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
-const
-  ClefLogLevelNames : array [TLogLevel.Trace..TLogLevel.None] of string = ('Verbose','Debug','Information','Warning','Error','Fatal','None');
-
 type
   TClefConsoleLogger = class;
   TClefConsoleLoggerProvider = class;
@@ -51,85 +48,65 @@ begin
   if not IsEnabled(LogLevel) then
     Exit;
 
-  var SR := TStringStream.Create;
-  var JB := TJsonTextWriter.Create(TStreamWriter.Create(SR), True);
+  var Entry: TLogEntry;
+  Entry.MessageTemplate := State.Template;
+  Entry.Message := Formatter(State, Exc);
+  Entry.Category := FCategory;
+  if Provider.UseUTC then
+    Entry.TimeStamp := TLogTime.UTC
+  else
+    Entry.TimeStamp := TLogTime.Now;
+  Entry.EventId := EventId;
+  Entry.LogLevel := LogLevel;
+
+  var Props := TDictionary<string, variant>.Create(Length(state.Values));
   try
-    JB.WriteStartObject;
-
-    JB.WritePropertyName('@t');
-    if FProvider.UseUTC then
-      JB.WriteValue(TLogTime.UTC.FormatISO8601)
-    else
-      JB.WriteValue(TLogTime.Now.FormatISO8601);
-
-    if LogLevel <> TLogLevel.Information then
-    begin
-      JB.WritePropertyName('@l');
-      JB.WriteValue(ClefLogLevelNames[LogLevel]);
-    end;
-
-    if Exc <> nil then
-    begin
-      JB.WritePropertyName('@x');
-      JB.WriteValue(Exc.Message+sLineBreak+Exc.StackTrace);
-    end;
-
-    JB.WritePropertyName('@mt');
-    JB.WriteValue(State.Template);
-
-    if Length(State.Values) > 0 then
-    begin
-      JB.WritePropertyName('@r');
-      JB.WriteStartArray;
-      for var val in State.Values do
-        JB.WriteValue(val.FmtValue);
-      JB.WriteEndArray;
-    end;
-
-    if EventId.Id > 0 then
-    begin
-      JB.WritePropertyName('@i');
-      JB.WriteValue(EventId.Id);
-    end;
-
-    // Serilog convention to call Category for SourceContext
-    JB.WritePropertyName('SourceContext');
-    JB.WriteValue(FCategory);
-
+    // Get static and dynamic properties
     LoggerFactory.EvalProperties(
       procedure(Name: String; Value: Variant)
       begin
-        JB.WritePropertyName(Name);
-        JB.WriteVariant(Value);
+        Props.AddOrSetValue(Name, Value);
       end
     );
 
-    for var item in State.Values do
-    begin
-      JB.WritePropertyName(item.Name);
-      JB.WriteVariant(item.Value);
-    end;
-
-    if FProvider.IncludeScopes then
-      TConsoleLoggerProviderAccess(FProvider).FScopes.ForEach(
+    // Get scope properties
+    if Provider.IncludeScopes then
+      TConsoleLoggerProviderAccess(Provider).FScopes.ForEach(
         procedure(const [ref] State: TState)
         begin
           for var item in State.Values do
           begin
-            JB.WritePropertyName(item.Name);
-            JB.WriteVariant(item.Value);
+            Props.AddOrSetValue(item.Name, item.Value);
           end;
         end
       );
 
-    JB.WriteEndObject;
-    JB.Flush;
+    var r := 0;
+    SetLength(Entry.Renderings, Length(state.Values));
+    // Get message template properties (values and renderings)
+    for var I := 0 to Length(state.Values)-1 do
+    begin
+      if state.Values[I].Fmt <> '' then
+      begin
+        Entry.Renderings[r] := state.Values[I].FmtValue;
+        Inc(r);
+      end;
+      Props.AddOrSetValue(state.Values[I].Name, state.Values[I].Value);
+    end;
+    SetLength(Entry.Renderings, r);
 
-    TConsoleLoggerProviderAccess(FProvider).FStdOut.WriteLn(SR.DataString);
+    Entry.Properties := Props.ToArray;
   finally
-    JB.Free;
-    SR.Free;
+    Props.Free;
   end;
+
+  if Exc <> nil then
+  begin
+    Entry.Exception.Message := Exc.ToString;
+    Entry.Exception.StackTrace := exc.StackTrace;
+  end;
+
+  TConsoleLoggerProviderAccess(Provider).FStdOut.WriteLn(Entry.ToClef);
 end;
 
 { TClefConsoleLoggerProvider }
@@ -139,7 +116,7 @@ begin
   var Logger := TClefConsoleLogger.Create;
   Logger.FCategory := Category;
   Logger.FProvider := Self;
-  Result := Logger;
+  Result := ILoggerImplementor<TConsoleLoggerProvider>(Logger);
 end;
 
 end.

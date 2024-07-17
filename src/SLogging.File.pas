@@ -19,24 +19,31 @@ type
   TFileLogger = class;
   TFileLoggerProvider = class;
 
+
   {* File Writer *}
 
   TFileWriter = class
   protected
     FActiveFileName: String;
     FFile: TFileStream;
+    FBuffer: TArray<byte>;
     procedure EnsureFile(const FileName: string; Formatter: TFunc<string, string>);
   public
-    procedure WriteLine(const Line: String; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
+    constructor Create;
     destructor Destroy; override;
+
+    procedure WriteLine(const Line: String; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
   end;
 
-  TFileLogger = class(TInterfacedObject, ILoggerImplementor)
+  TFileLogger = class(TInterfacedObject, ILoggerImplementor<TFileLoggerProvider>)
   protected
     FCategory: String;
-    FProvider: TFileLoggerProvider;
+    FProvider: ILoggerProvider;
   public
     constructor Create;
+    destructor Destroy; override;
+
+    function Provider: TFileLoggerProvider; inline;
 
     function IsEnabled(const LogLevel: TLogLevel): boolean; inline;
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter); virtual;
@@ -44,7 +51,7 @@ type
     procedure EndScope;
   end;
 
-  TFileLoggerProvider = class (TInterfacedObject, ILogQueueWorker<TLogEntry>, ILoggerProvider)
+  TFileLoggerProvider = class (TInterfacedObject, ILoggerProvider)
   private
     FUseUTC: Boolean;
     FMinLevel: TLogLevel;
@@ -70,6 +77,7 @@ type
 
     function CreateLogger(Category: string): ILoggerImplementor; virtual;
     procedure Close;
+    function Ref: TFileLoggerProvider;
 
     property UseUTC: Boolean read FUseUTC write FUseUTC;
     property MinLevel: TLogLevel read FMinLevel write SetMinLevel;
@@ -98,8 +106,15 @@ const
 
 { TFileWriter }
 
+constructor TFileWriter.Create;
+begin
+  inherited;
+  SetLength(FBuffer, 1024*32);
+end;
+
 destructor TFileWriter.Destroy;
 begin
+  SetLength(FBuffer, 0);
   FreeAndNil(FFile);
   inherited;
 end;
@@ -148,40 +163,53 @@ begin
   end;
 end;
 
-
 procedure TFileWriter.WriteLine(const Line: string; const FileName: string; FileNameFormatter: TFunc<string, string>; const Encoding: TEncoding);
 begin
   EnsureFile(FileName, FileNameFormatter);
+  var L := Encoding.GetByteCount(Line);
+  while L > Length(FBuffer) do
+    SetLength(FBuffer, 2*Length(FBuffer));
 
-  var writer := TStreamWriter.Create(FFile, Encoding);
-  try
-    writer.WriteLine(Line);
-    Writer.Flush;
-  finally
-    writer.Free;
-  end;
+  L := Encoding.GetBytes(Line, 1, Length(Line), FBuffer, 0);
+  FFile.Write(FBuffer, 0, L);
+
+  FBuffer[0] := 13;
+  FBuffer[1] := 10;
+
+  FFile.Write(FBuffer, 0, 2);
 end;
 
 { TFileLogger }
+
+function TFileLogger.Provider: TFileLoggerProvider;
+begin
+  Result := FProvider as TFileLoggerProvider;
+end;
 
 constructor TFileLogger.Create;
 begin
   inherited;
 end;
 
+destructor TFileLogger.Destroy;
+begin
+
+  inherited;
+end;
+
 function TFileLogger.IsEnabled(const LogLevel: TLogLevel): boolean;
 begin
-  Result := LogLevel >= FProvider.MinLevel;
+  Result := LogLevel >= Provider.MinLevel;
 end;
 
 procedure TFileLogger.BeginScope(const State: TState);
 begin
-  FProvider.FScopes.BeginScope(State);
+  Provider.FScopes.BeginScope(State);
 end;
 
 procedure TFileLogger.EndScope;
 begin
-  FProvider.FScopes.EndScope;
+  Provider.FScopes.EndScope;
 end;
 
 procedure TFileLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
@@ -193,7 +221,7 @@ begin
   Entry.MessageTemplate := State.Template;
   Entry.Message := Formatter(State, Exc);
   Entry.Category := FCategory;
-  if FProvider.UseUTC then
+  if Provider.UseUTC then
     Entry.TimeStamp := TLogTime.UTC
   else
     Entry.TimeStamp := TLogTime.Now;
@@ -211,8 +239,8 @@ begin
     );
 
     // Get scope properties
-    if FProvider.IncludeScopes then
-      FProvider.FScopes.ForEach(
+    if Provider.IncludeScopes then
+      Provider.FScopes.ForEach(
         procedure(const [ref] State: TState)
         begin
           for var item in State.Values do
@@ -247,10 +275,15 @@ begin
     Entry.Exception.StackTrace := exc.StackTrace;
   end;
 
-  FProvider.FQueue.Enqueue(Entry);
+  Provider.FQueue.Enqueue(Entry);
 end;
 
 { TFileLoggerProvider }
+
+function TFileLoggerProvider.Ref: TFileLoggerProvider;
+begin
+  Result := Self;
+end;
 
 procedure TFileLoggerProvider.Close;
 begin
@@ -263,7 +296,7 @@ begin
   FIncludeScopes := False;
   FScopes := TScopeHandler<TState>.Create;
   FWriter := TFileWriter.Create;
-  FQueue := TLogQueue<TLogEntry>.Create(Self);
+  FQueue := TLogQueue<TLogEntry>.Create(HandleDequeue);
   FQueue.OnWorkerError :=
     procedure (Exc: Exception)
     begin
@@ -313,7 +346,7 @@ begin
   var Logger := TFileLogger.Create;
   Logger.FCategory := Category;
   Logger.FProvider := Self;
-  Result := Logger;
+  Result := ILoggerImplementor<TFileLoggerProvider>(Logger);
 end;
 
 function TFileLoggerProvider.HandleDequeue(const [ref] Entry: TLogEntry): Boolean;

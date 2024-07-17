@@ -17,12 +17,15 @@ type
 
   {* Console Logger *}
 
-  TConsoleLogger = class(TInterfacedObject, ILoggerImplementor)
+  TConsoleLogger = class(TInterfacedObject, ILoggerImplementor<TConsoleLoggerProvider>)
   protected
-    FProvider: TConsoleLoggerProvider;
+    FProvider: ILoggerProvider;
     FCategory: String;
   public
     function IsEnabled(const LogLevel: TLogLevel): boolean; inline;
+
+    function Provider: TConsoleLoggerProvider; inline;
+
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter); virtual;
     procedure BeginScope(const State: TState);
     procedure EndScope;
@@ -63,17 +66,17 @@ const
 
 function TConsoleLogger.IsEnabled(const LogLevel: TLogLevel): boolean;
 begin
-  Result := LogLevel >= FProvider.MinLevel;
+  Result := LogLevel >= Provider.MinLevel;
 end;
 
 procedure TConsoleLogger.BeginScope(const State: TState);
 begin
-  FProvider.FScopes.BeginScope(State);
+  Provider.FScopes.BeginScope(State);
 end;
 
 procedure TConsoleLogger.EndScope;
 begin
-  FProvider.FScopes.EndScope;
+  Provider.FScopes.EndScope;
 end;
 
 procedure TConsoleLogger.Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
@@ -102,10 +105,15 @@ begin
       SB.Append(sLineBreak);
     end;
 
-    FProvider.FStdOut.WriteLn(SB.ToString);
+    Provider.FStdOut.WriteLn(SB.ToString);
   finally
     SB.Free;
   end;
+end;
+
+function TConsoleLogger.Provider: TConsoleLoggerProvider;
+begin
+  Result := FProvider as TConsoleLoggerProvider;
 end;
 
 { TConsoleLoggingProvider }
@@ -118,7 +126,6 @@ end;
 constructor TConsoleLoggerProvider.Create;
 begin
   FMinLevel := TLogLevel.Information;
-  FStdOut.Encoding := TEncoding.Default;
   FScopes := TScopeHandler<TState>.Create;
   FIncludeScopes := False;
   FUseUtc := True;
@@ -129,7 +136,7 @@ begin
   var Logger := TConsoleLogger.Create;
   Logger.FProvider := Self;
   Logger.FCategory := Category;
-  Result := Logger;
+  Result := ILoggerImplementor<TConsoleLoggerProvider>(Logger);
 end;
 
 destructor TConsoleLoggerProvider.Destroy;

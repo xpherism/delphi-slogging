@@ -25,6 +25,11 @@ type
     procedure WriteScopes(const [ref] Value: TArray<TState>);
   end;
 
+  TLogEntryHelper = record helper for TLogEntry
+  public
+    function ToClef: String;
+  end;
+
   TStdOutHelper = record helper for TStdout
   public
     procedure WriteJson(const [ref] Values: TArray<TPair<string, Variant>>);
@@ -34,6 +39,9 @@ type
 
 implementation
 
+uses
+  System.SysUtils;
+  
 { TJsonWriterHelper }
 
 procedure TJsonWriterHelper.WriteEventId(const [ref] EventId: TEventId);
@@ -135,6 +143,69 @@ begin
   finally
     JB.Free;
     SR.Free;
+  end;
+end;
+
+{ TLogEntryHelper }
+
+function TLogEntryHelper.ToClef: String;
+const
+  ClefLogLevelNames : array [TLogLevel.Trace..TLogLevel.None] of string = ('Verbose','Debug','Information','Warning','Error','Fatal','Fatal');
+begin
+  var SW := TStringWriter.Create;
+  var JB := TJsonTextWriter.Create(SW, False);
+  try
+    JB.WriteStartObject;
+
+    JB.WritePropertyName('@t');
+    JB.WriteValue(Timestamp.FormatISO8601);
+
+    if LogLevel <> TLogLevel.Information then
+    begin
+      JB.WritePropertyName('@l');
+      JB.WriteValue(ClefLogLevelNames[LogLevel]);
+    end;
+
+    if Self.Exception.Message <> '' then
+    begin
+      JB.WritePropertyName('@x');
+      JB.WriteValue(Exception.Message+sLineBreak+Exception.StackTrace);
+    end;
+
+    JB.WritePropertyName('SourceContext');
+    JB.WriteValue(Category);
+
+    if EventId.Id > 0 then
+    begin
+      JB.WritePropertyName('@i');
+      JB.WriteValue(EventId.Id);
+    end;
+
+    JB.WritePropertyName('@mt');
+    JB.WriteValue(MessageTemplate);
+
+    if Length(Renderings) > 0 then
+    begin
+      JB.WritePropertyName('@r');
+      JB.WriteStartArray;
+      for var val in Renderings do
+        JB.WriteValue(val);
+      JB.WriteEndArray;
+    end;
+
+    for var item in Properties do
+    begin
+      JB.WritePropertyName(item.Key);
+      JB.WriteVariant(item.Value);
+    end;
+
+    JB.WriteEndObject;
+    JB.Flush;
+
+    Result := SW.ToString;
+  finally
+    JB.Free;
+    SW.Free;
   end;
 end;
 

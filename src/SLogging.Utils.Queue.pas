@@ -14,9 +14,7 @@ uses
 {$B-} // Enable boolean short-circuit code generation by the compiler
 
 type
-  ILogQueueWorker<T> = interface
-    function HandleDequeue(const [ref] Entry: T): Boolean;
-  end;
+  TDequeueFunc<T> = function (const [ref] Entry: T): Boolean of object;
 
   ELogQueueFullException = class(Exception);
 
@@ -37,15 +35,17 @@ type
     FMinQueueSize: Integer;
     FMaxQueueSize: Integer;
     FMaxQueueTime: Integer;
-    FWorker: ILogQueueWorker<T>;
     FOnWorkerError: TProc<Exception>;
+    FDequeue: TDequeueFunc<T>;
     FWhenQueueFull: TLogQueueFullAction;
     procedure EnsureWorker;
     procedure HandleWorkerError(Exc: Exception); inline;
     procedure SetMinQueueSize(Value: Integer);
     procedure SetMaxQueueSize(Value: Integer);
+    constructor Create; overload;
   public
-    constructor Create(Worker: ILogQueueWorker<T>);
+    constructor Create(Dequeue: TDequeueFunc<T>); overload;
+
     destructor Destroy; override;
     procedure Close;
 
@@ -66,12 +66,17 @@ uses
 
 { TLogQueue<T> }
 
-constructor TLogQueue<T>.Create(Worker: ILogQueueWorker<T>);
+constructor TLogQueue<T>.Create(Dequeue: TDequeueFunc<T>);
 begin
-  if Worker = nil then
-    raise EArgumentNilException.Create('Worker cannot be nil');
+  if not Assigned(Dequeue) then
+    raise EArgumentNilException.Create('Dequeue cannot be nil');
+  FDequeue := Dequeue;
+  Create;
+end;
 
-  FWorker := Worker;
+constructor TLogQueue<T>.Create;
+begin
+  inherited;
   FMinQueueSize := 8;
   FMaxQueueSize := 1024;
   FWhenQueueFull := TLogQueueFullAction.Discard;
@@ -87,6 +92,7 @@ destructor TLogQueue<T>.Destroy;
 begin
   Close;
 
+  FQueue.Clear;
   FreeAndNil(FEvent);
   FreeAndNil(FQueue);
   FreeAndNil(FLock);
@@ -94,16 +100,11 @@ end;
 
 procedure TLogQueue<T>.Close;
 begin
-  if FTask = nil then
-    Exit;
-
-  while FQueue.Count > 0 do
-    CheckSynchronize(100);
-
-  FTask.Cancel;
+  if FTask <> nil then
+    FTask.Cancel;
 
   while FTask <> nil do
-    CheckSynchronize(100);
+    CheckSynchronize(1000);
 end;
 
 procedure TLogQueue<T>.Enqueue(const [ref] Entry: T);
@@ -161,7 +162,7 @@ begin
                 // reallocate if it needs to grow.
                 var Entry := FQueue.Peek;
 
-                if FWorker.HandleDequeue(Entry) then
+                if FDequeue(Entry) then
                 begin
                   TMonitor.Enter(FLock);
                   try

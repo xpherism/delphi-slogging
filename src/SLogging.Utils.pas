@@ -83,7 +83,11 @@ end;
 
 class operator TStdOut.Initialize(out Dest: TStdOut);
 begin
+{$IFDEF MSWINDOWS}
+  Dest.Encoding := TEncoding.GetEncoding(GetConsoleOutputCP);
+{$ELSE}
   Dest.Encoding := TEncoding.Default;
+{$ENDIF}
 end;
 
 procedure TStdOut.WriteLn(const txt: string);
@@ -115,7 +119,11 @@ end;
 
 class operator TStdErr.Initialize(out Dest: TStdErr);
 begin
+{$IFDEF MSWINDOWS}
+  Dest.Encoding := TEncoding.GetEncoding(GetConsoleOutputCP);
+{$ELSE}
   Dest.Encoding := TEncoding.Default;
+{$ENDIF}
 end;
 
 procedure TStdErr.WriteLn(const txt: string);

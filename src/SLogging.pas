@@ -91,7 +91,7 @@ type
   TState = record
   private
     class var Lock: TObject;
-    class var Formatters: TDictionary<string, TMessageTemplate>; // Format is key
+    class var Formatters: TObjectDictionary<string, TMessageTemplate>; // Format is key
   var
     FFormatter: TMessageTemplate;
     FTemplate: string;
@@ -151,6 +151,10 @@ type
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
     procedure BeginScope(const State: TState);
     procedure EndScope;
+  end;
+
+  ILoggerImplementor<P> = interface(ILoggerImplementor)
+    function Provider: P; // remember to inline in implementation (this is a workaround until Delphi supports generic interface methods)
   end;
 
   // Providers should always have zero argument constructor
@@ -266,7 +270,7 @@ type
 
   TLoggerFactory = class
   private
-    FProviders: TDictionary<string, ILoggerProvider>;
+    FProviders: TList<ILoggerProvider>;
     FStaticProps: TDictionary<string, Variant>;
     FDynamicProps: TDictionary<string, TFunc<Variant>>;
     FValueFormatter: TValueFormatter<Variant>;
@@ -276,11 +280,14 @@ type
     constructor Create;
     destructor Destroy; override;
 
+    procedure DebugDump;
+
     function CreateLogger<T>: ILogger<T>; overload;
     function CreateLogger(const Category: string): ILogger; overload;
 
     function AddProvider<T: ILoggerProvider, constructor>(ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
     function AddProvider<T: ILoggerProvider, constructor>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
+    procedure FlushAndClose;
 
     // static properties ie. process id, correlation id etc.
     function WithProperty(const Name: string; const Value: Variant): TLoggerFactory; overload;
@@ -686,7 +693,7 @@ begin
   FLoggers := TList<ILoggerImplementor>.Create;
   FCategory := Category;
 
-  for var Provider in LoggerFactory.FProviders.Values do
+  for var Provider in LoggerFactory.FProviders do
     FLoggers.Add(Provider.CreateLogger(FCategory));
 end;
 
@@ -911,9 +918,9 @@ end;
 
 function TLoggerFactory.AddProvider<T>(Provider: T; ConfigureProc: TProc<T>): TLoggerFactory;
 begin
-  var Name := (Provider as TInterfacedObject).QualifiedClassName;
+//  var Name := (Provider as TInterfacedObject).QualifiedClassName;
 
-  FProviders.Add(Name, Provider);
+  FProviders.Add(Provider);
 
   if Assigned(ConfigureProc) then
     ConfigureProc(Provider);
@@ -923,7 +930,7 @@ end;
 
 constructor TLoggerFactory.Create;
 begin
-  FProviders := TDictionary<string, ILoggerProvider>.Create;
+  FProviders := TList<ILoggerProvider>.Create;
   FStaticProps := TDictionary<string, Variant>.Create;
   FDynamicProps := TDictionary<string, TFunc<Variant>>.Create;
 
@@ -943,10 +950,8 @@ end;
 
 destructor TLoggerFactory.Destroy;
 begin
-  for var Provider in FProviders.Values do
-    Provider.Close;
+  FlushAndClose;
 
-  FProviders.Clear;
   FStaticProps.Clear;
   FDynamicProps.Clear;
   FreeAndNil(FStaticProps);
@@ -972,6 +977,23 @@ procedure TLoggerFactory.HandleInternalException(const Exc: Exception);
 begin
   if Assigned(FOnException) then
     FOnException(Exc);
+end;
+
+procedure TLoggerFactory.FlushAndClose;
+begin
+  for var Provider in FProviders do
+    Provider.Close;
+
+  FProviders.Clear;
+end;
+
+procedure TLoggerFactory.DebugDump;
+begin
+  for var Provider in FProviders do
+  begin
+    var O := Provider as TInterfacedObject;
+    Writeln(O.ClassName, O.RefCount);
+  end;
 end;
 
 { TState }
@@ -1073,7 +1095,7 @@ end;
 
 initialization
   TState.Lock := TObject.Create;
-  TState.Formatters := TDictionary<string, TMessageTemplate>.Create;
+  TState.Formatters := TObjectDictionary<string, TMessageTemplate>.Create([doOwnsValues]);
   LoggerFactory := TLoggerFactory.Create;
 
 finalization
