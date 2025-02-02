@@ -13,6 +13,7 @@ type
   TStdOut = record
     Encoding: TEncoding;
     class operator Initialize(out Dest: TStdOut);
+    class operator Finalize (var Dest: TStdOut);
     procedure Write(const txt: string);
     procedure WriteLn(const txt: string); inline;
   end;
@@ -20,6 +21,7 @@ type
   TStdErr = record
     Encoding: TEncoding;
     class operator Initialize(out Dest: TStdErr);
+    class operator Finalize (var Dest: TStdErr);
     procedure Write(const txt: string);
     procedure WriteLn(const txt: string); inline;
   end;
@@ -81,6 +83,13 @@ end;
 
 { TStdOut }
 
+class operator TStdOut.Finalize(var Dest: TStdOut);
+begin
+{$IFDEF MSWINDOWS}
+  FreeAndNil(Dest.Encoding);
+{$ENDIF}
+end;
+
 class operator TStdOut.Initialize(out Dest: TStdOut);
 begin
 {$IFDEF MSWINDOWS}
@@ -116,6 +125,13 @@ end;
 {$ENDIF}
 
 { TStdErr }
+
+class operator TStdErr.Finalize(var Dest: TStdErr);
+begin
+{$IFDEF MSWINDOWS}
+  FreeAndNil(Dest.Encoding);
+{$ENDIF}
+end;
 
 class operator TStdErr.Initialize(out Dest: TStdErr);
 begin
