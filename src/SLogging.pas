@@ -37,8 +37,8 @@ type
     IsUTC: Boolean;
     class function Now: TLogTime; static;
     class function UTC: TLogTime; static;
-    function ToDateTime: TDateTime;
-    function ToLocalTime: TLogTime;
+    function ToDateTime: TDateTime; inline;
+    function ToLocalTime: TLogTime; inline;
     function FormatISO8601: string; inline;
   end;
 
@@ -123,6 +123,18 @@ type
     Properties: TArray<TPair<String, Variant>>;
     Renderings: TArray<String>;
   end;
+//
+//  TActivity = record
+//  end;
+//
+//  IActivity = interface
+//  end;
+//
+//  IActivity<T> = interface(IActivity)
+//  end;
+//
+//  IActivityHandler<T> = interface
+//  end;
 
   TScopeForEachProc<T> = reference to procedure(const [ref] State: T);
 
@@ -145,7 +157,7 @@ type
   end;
 
   // Delphi does not support helper methods for interfaces, so we need a specific interface for
-  // implementation specific and proxy interface for general usage
+  // implementation and proxy interface for general usage
   ILoggerImplementor = interface
     function IsEnabled(const LogLevel: TLogLevel): boolean;
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const State: TState; const Exc: Exception; const Formatter: TStateFormatter);
@@ -169,7 +181,6 @@ type
     Variant keeps "distinct" type info during assignment (ie. TDateTime is varDate and not float), which TValue or TVarRec does not do
     This is the proxy interface that everyone uses, T is the type used for category name
   *}
-
   ILogger = interface
     function IsEnabled(const LogLevel: TLogLevel): boolean;
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>);
@@ -182,35 +193,35 @@ type
     //    procedure EndScope;
 
     // helper methods
-    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogTrace(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogTrace(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogTrace(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogTrace(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogTrace(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
 
-    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogDebug(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogDebug(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogDebug(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogDebug(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogDebug(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
 
-    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogInformation(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogInformation(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogInformation(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogInformation(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogInformation(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
 
-    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogWarning(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogWarning(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogWarning(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogWarning(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogWarning(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
 
-    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogError(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogError(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogError(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogError(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogError(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
 
-    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>); overload;
-    procedure LogCritical(const MessageTemplate: string; const Args: TArray<Variant>); overload;
+    procedure LogCritical(const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogCritical(const EventId: TEventId; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogCritical(const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
+    procedure LogCritical(const MessageTemplate: string; const Args: TArray<Variant> = []); overload;
   end;
 
   TLogger = class(TInterfacedObject, ILogger)
@@ -225,6 +236,11 @@ type
     procedure Log(const LogLevel: TLogLevel; const EventId: TEventId; const Exc: Exception; const MessageTemplate: string; const Args: TArray<Variant>);
     procedure BeginScope(const Properties: TArray<TPair<string, variant>>);
     procedure EndScope;
+
+    // Auto collect TraceId from env vars (TRACE_ID)?
+    //WIP Tracing support (Add SpanId, ParentSpanId, TraceId to properties) or Activity json object to properties?
+    // Activities are kept track on global level
+//    function StartActivity(const MessageTemplate: string; const Args: TArray<Variant>): IActivity; // interface for lifetime tracking
 
 //    procedure BeginScope(const MessageTemplate: string; const Args: TArray<Variant>);
 //    procedure EndScope;
@@ -276,6 +292,8 @@ type
     FValueFormatter: TValueFormatter<Variant>;
     FStateFormatter: TStateFormatter;
     FOnException: TProc<Exception>;
+  protected
+    procedure EvalProperties(const Proc: TProc<String, Variant>);
   public
     constructor Create;
     destructor Destroy; override;
@@ -289,11 +307,11 @@ type
     function AddProvider<T: ILoggerProvider, constructor>(Provider: T; ConfigureProc: TProc<T> = nil): TLoggerFactory; overload;
     procedure FlushAndClose;
 
-    // static properties ie. process id, correlation id etc.
+    // static properties
     function WithProperty(const Name: string; const Value: Variant): TLoggerFactory; overload;
-    // dynamic properties called on every log event, thread id,
+
+    // dynamic properties (evaluated for every log event)
     function WithProperty(const Name: string; const Func: TFunc<Variant>): TLoggerFactory; overload;
-    procedure EvalProperties(const Proc: TProc<String, Variant>);
 
     procedure HandleInternalException(const Exc: Exception); inline;
     property ValueFormatter: TValueFormatter<Variant> read FValueFormatter write FValueFormatter;

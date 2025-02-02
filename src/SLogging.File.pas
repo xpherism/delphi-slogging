@@ -104,6 +104,9 @@ uses
 const
   LogLevelNames : array [TLogLevel.Trace..TLogLevel.None] of string = ('TRACE','DEBUG','INFO ','WARN ','ERROR','FATAL','NONE ');
 
+type
+  TLoggerFactoryAccess = class(TLoggerFactory);
+
 { TFileWriter }
 
 constructor TFileWriter.Create;
@@ -231,7 +234,7 @@ begin
   var Props := TDictionary<string, variant>.Create(Length(state.Values));
   try
     // Get static and dynamic properties
-    LoggerFactory.EvalProperties(
+    TLoggerFactoryAccess(LoggerFactory).EvalProperties(
       procedure(Name: String; Value: Variant)
       begin
         Props.AddOrSetValue(Name, Value);

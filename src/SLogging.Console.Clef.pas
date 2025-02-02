@@ -39,6 +39,7 @@ uses
   System.DateUtils;
 
 type
+  TLoggerFactoryAccess = class(TLoggerFactory);
   TConsoleLoggerProviderAccess = class(TConsoleLoggerProvider);
 
 { TClefConsoleLogger }
@@ -62,7 +63,7 @@ begin
   var Props := TDictionary<string, variant>.Create(Length(state.Values));
   try
     // Get static and dynamic properties
-    LoggerFactory.EvalProperties(
+    TLoggerFactoryAccess(LoggerFactory).EvalProperties(
       procedure(Name: String; Value: Variant)
       begin
         Props.AddOrSetValue(Name, Value);
