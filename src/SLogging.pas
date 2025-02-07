@@ -319,7 +319,7 @@ type
     property OnException: TProc<Exception> read FOnException write FOnException;
   end;
   
-  function DefaultValueFormatter(const Fmt: string; const [ref] Value: Variant): string; inline;  
+  function DefaultValueFormatter(const Fmt: string; const [ref] Value: Variant): string; inline;
   function DefaultStateFormatter(const [ref] State: TState; const Exc: Exception): string; inline;
 
   function EventId(Id: Integer; Name: String): TEventId; inline;
@@ -347,33 +347,28 @@ end;
 
 function DefaultValueFormatter(const Fmt: string; [ref] const Value: Variant): string;
 begin
-  if Fmt <> '' then
-    case VarType(Value) of
-      varEmpty: Result := '(null)';
-      varNull: Result := '(null)';
-      varSmallInt: Result := Format(Fmt, [TVarData(Value).VSmallInt]);
-      varInteger: Result := Format(Fmt, [TVarData(Value).VInteger]);
-      varSingle: Result := Format(Fmt, [TVarData(Value).VSingle]);
-      varDouble: Result := Format(Fmt, [TVarData(Value).VDouble]);
-      varCurrency: Result := Format(Fmt, [TVarData(Value).VCurrency]);
-      varDate: Result := FormatDateTime(Fmt, TVarData(Value).VDate);
-      varOleStr: Format(Fmt, [String(TVarData(Value).VOleStr)]);
-      varBoolean: Result := BoolToStr(Value, Fmt <> '1');
-      varShortInt: Result := Format(Fmt, [TVarData(Value).VShortInt]);
-      varByte: Result := Format(Fmt, [TVarData(Value).VByte]);
-      varWord: Result := Format(Fmt, [TVarData(Value).VWord]);
-      varUInt32: Result := Format(Fmt, [TVarData(Value).VUInt32]);
-      varInt64: Result := Format(Fmt, [TVarData(Value).VInt64]);
-      varUInt64: Result := Format(Fmt, [TVarData(Value).VUInt64]);
-      varString:  Result := Format(Fmt, [RawByteString(TVarData(Value).VString)]);
-      varUString: Result := Format(Fmt, [UnicodeString(TVarData(Value).VUString)]);
-      else
-        Result := VarToStr(Value);
-    end
-  else if (Value = NULL) or (Value = Unassigned) then
-    Result := '(null)'
-  else
-    Result := VarToStr(Value);
+  case VarType(Value) of
+    varEmpty: Result := '(null)';
+    varNull: Result := '(null)';
+    varSmallInt: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VSmallInt]), VarToStr(Value));
+    varInteger: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VInteger]), VarToStr(Value));
+    varSingle: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VSingle]), VarToStr(Value));
+    varDouble: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VDouble]), VarToStr(Value));
+    varCurrency: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VCurrency]), VarToStr(Value));
+    varDate: Result := IfThen(Fmt <> '', FormatDateTime(Fmt, TVarData(Value).VDate), VarToStr(Value));
+    varOleStr: IfThen(Fmt <> '', Format(Fmt, [String(TVarData(Value).VOleStr)]), VarToStr(Value));
+    varBoolean: Result := IfThen(Fmt <> '', BoolToStr(Value, Fmt <> '1'), VarToStr(Value));
+    varShortInt: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VShortInt]), VarToStr(Value));
+    varByte: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VByte]), VarToStr(Value));
+    varWord: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VWord]), VarToStr(Value));
+    varUInt32: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VUInt32]), VarToStr(Value));
+    varInt64: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VInt64]), VarToStr(Value));
+    varUInt64: Result := IfThen(Fmt <> '', Format(Fmt, [TVarData(Value).VUInt64]), VarToStr(Value));
+    varString:  Result := IfThen(Fmt <> '', Format(Fmt, [RawByteString(TVarData(Value).VString)]), VarToStr(Value));
+    varUString: Result := IfThen(Fmt <> '', Format(Fmt, [UnicodeString(TVarData(Value).VUString)]), VarToStr(Value));
+    else
+      Result := VarToStr(Value);
+  end
 end;
 
 function DefaultStateFormatter(const [ref] State: TState; const Exc: Exception): string;
