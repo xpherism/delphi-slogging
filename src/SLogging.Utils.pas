@@ -11,6 +11,9 @@ uses
 
 type
   TStdOut = record
+  private
+    DefaultEncoding: TEncoding;
+  public
     Encoding: TEncoding;
     class operator Initialize(out Dest: TStdOut);
     class operator Finalize (var Dest: TStdOut);
@@ -19,6 +22,9 @@ type
   end;
 
   TStdErr = record
+  private
+    DefaultEncoding: TEncoding;
+  public
     Encoding: TEncoding;
     class operator Initialize(out Dest: TStdErr);
     class operator Finalize (var Dest: TStdErr);
@@ -85,18 +91,18 @@ end;
 
 class operator TStdOut.Finalize(var Dest: TStdOut);
 begin
-{$IFDEF MSWINDOWS}
-  FreeAndNil(Dest.Encoding);
-{$ENDIF}
+  if not TEncoding.IsStandardEncoding(Dest.DefaultEncoding) then
+    FreeAndNil(Dest.DefaultEncoding);
 end;
 
 class operator TStdOut.Initialize(out Dest: TStdOut);
 begin
 {$IFDEF MSWINDOWS}
-  Dest.Encoding := TEncoding.GetEncoding(GetConsoleOutputCP);
+  Dest.DefaultEncoding := TEncoding.GetEncoding(GetConsoleOutputCP);
 {$ELSE}
-  Dest.Encoding := TEncoding.Default;
+  Dest.DefaultEncoding := TEncoding.Default;
 {$ENDIF}
+  Dest.Encoding := Dest.DefaultEncoding;
 end;
 
 procedure TStdOut.WriteLn(const txt: string);
@@ -128,18 +134,18 @@ end;
 
 class operator TStdErr.Finalize(var Dest: TStdErr);
 begin
-{$IFDEF MSWINDOWS}
-  FreeAndNil(Dest.Encoding);
-{$ENDIF}
+  if not TEncoding.IsStandardEncoding(Dest.DefaultEncoding) then
+    FreeAndNil(Dest.DefaultEncoding);
 end;
 
 class operator TStdErr.Initialize(out Dest: TStdErr);
 begin
 {$IFDEF MSWINDOWS}
-  Dest.Encoding := TEncoding.GetEncoding(GetConsoleOutputCP);
+  Dest.DefaultEncoding := TEncoding.GetEncoding(GetConsoleOutputCP);
 {$ELSE}
-  Dest.Encoding := TEncoding.Default;
+  Dest.DefaultEncoding := TEncoding.Default;
 {$ENDIF}
+  Dest.Encoding := Dest.DefaultEncoding;
 end;
 
 procedure TStdErr.WriteLn(const txt: string);

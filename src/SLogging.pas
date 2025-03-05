@@ -18,6 +18,7 @@ interface
 uses
   System.Variants,
   System.SysUtils,
+  System.StrUtils,
   System.Classes,
   System.Generics.Collections;
 
@@ -336,8 +337,7 @@ uses
 {$ENDIF}
   System.Rtti,
   System.DateUtils,
-  System.TypInfo,
-  System.StrUtils;
+  System.TypInfo;
 
 function P(const Name: String; Value: Variant): TPair<string, variant>; inline;
 begin
