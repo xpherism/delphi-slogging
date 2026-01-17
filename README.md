@@ -1,3 +1,5 @@
+NOTE! This repository has moved to https://codeberg.org/xpherism/delphi-slogging
+
 # delphi-slogging (WIP)
 Delphi structured logging framework inspired by .NET logging framework.
 
